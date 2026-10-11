@@ -1,13 +1,5 @@
-# Copy to config.toml in the checkout (gitignored). Everything identifying the owner lives only there.
-[book]
-title = "Your Book Title"
-
-[sender]
-name = "Your Name"
-address = "you@mail.example.com"      # a sending subdomain you control (SPF, DKIM, DMARC set)
-reply_to = "you+book@gmail.example"   # plus-address read by the inbox area
-postal_address = "Street, City, State ZIP"   # CAN-SPAM footer
-
+# Behaviour only (copy to config.toml, optional). The book title, sender and footer address are
+# set in the web app and stored in the database.
 [caps]
 max_recipients_per_send = 50
 max_sends_per_day = 100

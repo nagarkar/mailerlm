@@ -14,6 +14,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from mailerlm.campaigns import schema as campaigns_schema
 from mailerlm.contacts import schema as contacts_schema
 from mailerlm.errors import MailerlmError
 
@@ -25,6 +26,7 @@ MIGRATIONS: list[str] = [
     ) STRICT;
     """,
     contacts_schema.MIGRATION,
+    campaigns_schema.MIGRATION,
 ]
 
 

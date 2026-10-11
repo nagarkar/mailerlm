@@ -189,25 +189,25 @@ def build_parser() -> clikit.Parser:
         "mailerlm contacts do-not-mail ada@example.com",
     )
 
-    campaigns = sub.add_parser("campaigns", help="campaign files: new, list, check, preview")
+    campaigns = sub.add_parser("campaigns", help="campaigns: new, list, check, preview")
     campaign_verbs = campaigns.add_subparsers(dest="subcommand", required=True)
-    new = campaign_verbs.add_parser("new", help="start a campaign file from a starter")
+    new = campaign_verbs.add_parser("new", help="create a campaign from a starter")
     new.add_argument("name")
     new.add_argument(
         "--starter", default="update", help="confirmation, update, early-access or launch"
     )
     _mutating(new)
-    new.set_defaults(api="campaigns_new")
+    new.set_defaults(api="campaigns_create")
     clikit.describe(
         new,
-        "Copy a starter into the workspace as campaigns/<name>.md; never overwrites an existing file.",
+        "Create a campaign in the database from a starter (edit it in the web app). Never overwrites an existing campaign.",
         "mailerlm campaigns new october-update --starter update",
     )
     listing = campaign_verbs.add_parser("list", help="campaign files and starters")
     listing.set_defaults(api="campaigns_list")
     clikit.describe(
         listing,
-        "List your campaign files and the starters you can copy.",
+        "List your campaigns and the starters you can create one from.",
         "mailerlm campaigns list",
     )
     check = campaign_verbs.add_parser(
@@ -217,7 +217,7 @@ def build_parser() -> clikit.Parser:
     check.set_defaults(api="campaigns_check")
     clikit.describe(
         check,
-        "Validate the file, render it, check the images against the size budget and count who it would reach. Sends nothing.",
+        "Render the campaign, check its images against the size budget and count who it would reach. Sends nothing.",
         "mailerlm campaigns check october-update",
     )
     preview = campaign_verbs.add_parser(
@@ -230,7 +230,7 @@ def build_parser() -> clikit.Parser:
     preview.set_defaults(api="campaigns_preview")
     clikit.describe(
         preview,
-        "Write previews/<name>.html and .txt in the workspace with images inline.",
+        "Write previews/<name>.html and .txt in the workspace with images inline, to open in a browser.",
         "mailerlm campaigns preview october-update",
     )
 
@@ -274,6 +274,8 @@ def format_board(board: dict, as_json: bool) -> str:
                 lines.append(
                     f"  {row['email']} {row['name']!r} lists={row['lists']} tags={row['tags']}{linkedin}{flag}"
                 )
+        elif key in ("html", "text") and not str(value).startswith("/"):
+            lines.append(f"{key}: ({len(str(value))} characters; use --json to read it)")
         elif key == "problems":
             lines.append("problems:" if value else "problems: none")
             lines += [f"  {item}" for item in value]

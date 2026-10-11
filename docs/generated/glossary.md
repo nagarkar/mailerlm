@@ -3,7 +3,7 @@
 # Glossary
 
 - **audience** (`mailerlm.campaigns`): the subscribed members of the campaign's lists that carry its tags.
-- **campaign** (`mailerlm.campaigns`): one Markdown file plus its front matter (subject, lists, tags, flags), sent once.
+- **campaign** (`mailerlm.campaigns`): one letter with its subject, body, values, lists, tags and flags, sent once.
 - **contact** (`mailerlm.contacts`): one person, identified by a normalized email address and optionally a LinkedIn profile URL.
 - **double opt-in** (`mailerlm.consent`): a contact is mailed campaigns only after replying yes to a confirmation email.
 - **linkedin status** (`mailerlm.linkedin`): where a contact stands in the move from a LinkedIn conversation to a confirmed email subscription.
@@ -12,6 +12,8 @@
 - **needs-you queue** (`mailerlm.consent`): replies the classifier did not settle, waiting for the owner.
 - **reply** (`mailerlm.inbox`): an inbound message to the list's reply address, with its thread.
 - **send** (`mailerlm.delivery`): one campaign delivered to one audience, recorded as a row per recipient.
+- **starter** (`mailerlm.campaigns`): a shipped campaign text that a new campaign is created from.
 - **tag** (`mailerlm.contacts`): a free label on a contact, such as `early-access`, used to narrow a campaign's audience.
 - **template** (`mailerlm.campaigns`): the HTML and text frame a campaign body is placed in.
+- **value** (`mailerlm.campaigns`): a named piece of text a campaign substitutes into its subject and body, such as `book_title`.
 - **workspace** (`mailerlm`): the private directory holding the SQLite store, config, campaign files, images and token files.

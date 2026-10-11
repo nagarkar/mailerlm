@@ -4,7 +4,7 @@ Display width is at most 600 px; the file is up to twice that for sharp (retina)
 source is large enough. Photos become JPEG, line art and transparent images become PNG
 (palette-reduced when needed), animated GIFs keep their frames only when they fit, otherwise the
 first frame becomes a PNG. WebP and other formats Pillow can read are converted; clients such as
-Outlook do not render them. The result is cached by the sha256 of the source plus the budget.
+Outlook do not render them. The result is remembered per process by source bytes and budget.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import io
 from dataclasses import dataclass
-from pathlib import Path
+from functools import lru_cache
 
 from PIL import Image, ImageOps
 
@@ -109,19 +109,7 @@ def prepare(source: bytes, budget_bytes: int) -> PreparedImage:
     return PreparedImage(data, mime, extension, display_width, display_height, digest)
 
 
-def prepare_cached(path: Path, budget_bytes: int, cache_directory: Path) -> PreparedImage:
-    """`prepare` with a content-hash cache in `cache_directory` (the workspace)."""
-    source = path.read_bytes()
-    key = hashlib.sha256(source + str(budget_bytes).encode()).hexdigest()
-    entry = cache_directory / key
-    meta = entry.with_suffix(".meta")
-    if entry.exists() and meta.exists():
-        mime, extension, width, height, digest = meta.read_text().split("|")
-        return PreparedImage(entry.read_bytes(), mime, extension, int(width), int(height), digest)
-    prepared = prepare(source, budget_bytes)
-    cache_directory.mkdir(parents=True, exist_ok=True)
-    entry.write_bytes(prepared.data)
-    meta.write_text(
-        f"{prepared.mime}|{prepared.extension}|{prepared.display_width}|{prepared.display_height}|{prepared.source_sha256}"
-    )
-    return prepared
+@lru_cache(maxsize=64)
+def prepare_cached(source: bytes, budget_bytes: int) -> PreparedImage:
+    """`prepare`, remembered for the life of the process (the same bytes and budget cost nothing twice)."""
+    return prepare(source, budget_bytes)

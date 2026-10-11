@@ -2,7 +2,8 @@
 
 An absent file means every default; a present file is rejected by name for an unknown section
 or key, a wrong type, a non-positive cap, or thresholds out of order. Everything identifying the
-owner lives in the gitignored `config.toml` (see `config.example.toml`).
+owner (book title, sender, footer address) lives in the database, edited on the review page; this
+file holds behaviour only (caps and classifier thresholds).
 """
 
 from __future__ import annotations
@@ -15,8 +16,6 @@ from typing import Any
 from mailerlm.errors import MailerlmError
 
 DEFAULTS: dict[str, dict[str, Any]] = {
-    "book": {"title": ""},
-    "sender": {"name": "", "address": "", "reply_to": "", "postal_address": ""},
     "caps": {
         "max_recipients_per_send": 50,
         "max_sends_per_day": 100,

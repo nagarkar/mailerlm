@@ -20,7 +20,7 @@ Never imports: cli (enforced by the import contract "api below cli" in pyproject
 
 `src/mailerlm/campaigns/__init__.py`
 
-Campaigns: a Markdown file with front matter becomes an email.
+Campaigns: the letters you send, kept in the database and edited in the web app.
 
 Never imports: delivery, inbox, linkedin (enforced by the import contract "domain below
 

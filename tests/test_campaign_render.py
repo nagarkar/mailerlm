@@ -1,16 +1,18 @@
-"""front matter and rendering: tables, images, raw HTML left out, footer, placeholders."""
+"""front matter (starters) and rendering: tables, images, raw HTML left out, footer, values."""
+
+import io
 
 import pytest
 from PIL import Image
 
-from mailerlm.campaigns import frontmatter, render
+from mailerlm.campaigns import frontmatter, render, repository
 
-FILE = """---
-subject: "Hello {{ book_title }}"
-lists: [book-interest]
-tags: [early-access]
----
-Hi {{ first_name }},
+FRAME_HTML = "<html><body>{{ body_html | safe }}<footer>{{ unsubscribe_line }} {{ sender_name }}, {{ postal_address }}</footer></body></html>"
+FRAME_TEXT = (
+    "{{ body_text }}\n--\n{{ unsubscribe_line }}\n{{ sender_name }}, {{ postal_address }}\n"
+)
+
+BODY = """Hi {{ first_name }}, about {{ book_title }}.
 
 | A | B |
 |---|---|
@@ -24,27 +26,34 @@ A [link](https://example.com/x) here.
 """
 
 
-def parts(tmp_path, text=FILE, **overrides):
-    Image.new("RGB", (800, 400), "navy").save(tmp_path / "cover.png")
-    campaign = frontmatter.parse(text)
+def png() -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGB", (800, 400), "navy").save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+def email(body=BODY, **overrides):
     arguments = dict(
-        campaign_directory=tmp_path,
-        book_title="The Book",
+        subject="Hello {{ book_title }}",
+        body=body,
+        preview_text="",
+        frame_html=FRAME_HTML,
+        frame_text=FRAME_TEXT,
+        variables={"book_title": "The Book"},
         sender_name="Ann",
         postal_address="1 Main St",
         reply_to="ann+book@example.com",
+        resolve_image=lambda name: png() if name == "cover.png" else None,
         image_budget_bytes=100 * 1024,
-        image_cache_directory=tmp_path / "c",
     )
     arguments.update(overrides)
-    return render.render(campaign, **arguments)
+    return render.render(**arguments)
 
 
-def test_front_matter_is_parsed_and_validated():
-    campaign = frontmatter.parse(FILE)
-    assert campaign.lists == ("book-interest",) and campaign.tags == ("early-access",)
+def test_starter_front_matter_is_parsed_and_validated():
+    campaign = frontmatter.parse('---\nsubject: "S"\nlists: [a]\ntags: [t]\n---\nbody here')
+    assert campaign.lists == ("a",) and campaign.tags == ("t",) and campaign.body == "body here"
     assert campaign.track_clicks is False and campaign.kind == "campaign"
-    assert campaign.body.startswith("Hi {{ first_name }}")
 
 
 @pytest.mark.parametrize(
@@ -63,39 +72,48 @@ def test_bad_front_matter_names_the_problem(text, message):
         frontmatter.parse(text)
 
 
-def test_the_email_has_a_table_an_inline_image_a_footer_and_no_raw_html(tmp_path):
-    email = parts(tmp_path)
-    assert email.subject == "Hello The Book"
-    assert "<table" in email.html and "<th" in email.html
-    assert 'src="cid:image1"' in email.html and email.images[0].content_id == "image1"
-    assert "<script>" not in email.html and "&lt;script&gt;" in email.html
-    assert "1 Main St" in email.html and "Reply UNSUBSCRIBE" in email.text
-    assert "Hi there," in email.text and "A | B" in email.text and "[cover]" in email.text
-    assert "link (https://example.com/x)" in email.text
-    assert email.unsubscribe_mailto == "mailto:ann+book@example.com?subject=unsubscribe"
+def test_the_email_has_a_table_an_inline_image_a_footer_and_no_raw_html():
+    result = email()
+    assert result.subject == "Hello The Book"
+    assert "<table" in result.html and "<th" in result.html
+    assert 'src="cid:image1"' in result.html and result.images[0].content_id == "image1"
+    assert "<script>" not in result.html and "&lt;script&gt;" in result.html
+    assert "1 Main St" in result.html and "Reply UNSUBSCRIBE" in result.text
+    assert "Hi there, about The Book." in result.text and "A | B" in result.text
+    assert "link (https://example.com/x)" in result.text
+    assert result.unsubscribe_mailto == "mailto:ann+book@example.com?subject=unsubscribe"
 
 
-def test_missing_postal_address_warns_and_marks_the_footer(tmp_path):
-    email = parts(tmp_path, postal_address="")
-    assert any("postal_address" in w for w in email.warnings)
-    assert "[postal address not set" in email.html
+def test_missing_postal_address_and_empty_values_warn():
+    result = email(postal_address="", variables={"book_title": ""})
+    assert any("postal address" in w for w in result.warnings)
+    assert any("'book_title' is empty" in w for w in result.warnings)
 
 
-def test_a_web_image_or_an_escaping_path_is_rejected(tmp_path):
+def test_a_web_image_or_an_unknown_image_is_rejected():
     with pytest.raises(render.RenderError, match="web address"):
-        parts(tmp_path, "---\nsubject: s\n---\n![x](https://example.com/a.png)")
-    with pytest.raises(render.RenderError, match="outside the campaign folder"):
-        parts(tmp_path, "---\nsubject: s\n---\n![x](../secret.png)")
-    with pytest.raises(render.RenderError, match="does not exist"):
-        parts(tmp_path, "---\nsubject: s\n---\n![x](gone.png)")
+        email("![x](https://example.com/a.png)")
+    with pytest.raises(render.RenderError, match="not uploaded"):
+        email("![x](gone.png)")
 
 
-def test_an_unknown_placeholder_is_an_error(tmp_path):
-    with pytest.raises(render.RenderError, match="placeholder"):
-        parts(tmp_path, "---\nsubject: s\n---\nHi {{ nope }}")
+def test_an_unknown_value_is_an_error():
+    with pytest.raises(render.RenderError, match="unknown value"):
+        email("Hi {{ nope }}")
 
 
-def test_missing_alt_text_warns(tmp_path):
-    assert any(
-        "alt text" in w for w in parts(tmp_path, "---\nsubject: s\n---\n![](cover.png)").warnings
-    )
+def test_a_broken_template_is_an_error_not_a_crash():
+    with pytest.raises(render.RenderError, match="template"):
+        email(frame_html="{{ body_html | safe }} {{ undefined_thing }}")
+
+
+def test_missing_alt_text_warns():
+    assert any("alt text" in w for w in email("![](cover.png)").warnings)
+
+
+def test_a_template_must_keep_the_place_for_the_letter():
+    import sqlite3
+
+    connection = sqlite3.connect(":memory:")
+    with pytest.raises(repository.CampaignsError, match="body_html"):
+        repository.template_save(connection, "x", "<html></html>", "{{ body_text }}")

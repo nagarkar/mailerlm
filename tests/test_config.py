@@ -37,6 +37,5 @@ def test_bad_config_is_rejected_by_name(tmp_path, text, message):
 
 
 def test_a_valid_file_overrides_defaults(tmp_path):
-    settings = config.load(write(tmp_path, '[book]\ntitle = "T"\n[caps]\nmax_sends_per_day = 5'))
-    assert settings.get("book", "title") == "T"
+    settings = config.load(write(tmp_path, "[caps]\nmax_sends_per_day = 5"))
     assert settings.get("caps", "max_sends_per_day") == 5
