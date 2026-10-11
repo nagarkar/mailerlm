@@ -24,6 +24,10 @@ class ContactsError(ValueError):
     """A request the contacts area cannot satisfy; the message names the fix."""
 
 
+class ContactsNotFound(ContactsError):
+    """The named list or contact does not exist."""
+
+
 @dataclass(frozen=True, slots=True)
 class ImportCounts:
     added: int = 0
@@ -35,7 +39,7 @@ class ImportCounts:
 def list_id(connection: sqlite3.Connection, name: str) -> int:
     row = connection.execute("SELECT id FROM mailing_list WHERE name = ?", (name,)).fetchone()
     if row is None:
-        raise ContactsError(f"no list named '{name}'. Run: mailerlm lists add {name}")
+        raise ContactsNotFound(f"no list named '{name}'. Run: mailerlm lists add {name}")
     return row[0]
 
 
@@ -119,34 +123,83 @@ def import_candidates(
     tags: tuple[str, ...] = (),
     now: Clock = datetime.now,
 ) -> ImportCounts:
-    """One transaction: everything is added or nothing is."""
+    """Runs inside the caller's transaction, so everything is added or nothing is."""
     list_identifier = list_id(connection, list_name) if list_name else None
     counts = {"added": 0, "already_present": 0, "memberships_added": 0, "tags_added": 0}
-    connection.execute("BEGIN")
-    try:
-        for candidate in candidates:
-            contact_id, is_new = upsert_contact(connection, candidate, now)
-            counts["added" if is_new else "already_present"] += 1
-            if list_identifier is not None and join_list(
-                connection, contact_id, list_identifier, now
-            ):
-                counts["memberships_added"] += 1
-            for tag in (*tags, *candidate.tags):
-                counts["tags_added"] += add_tag(connection, contact_id, tag)
-    except Exception:
-        connection.execute("ROLLBACK")
-        raise
-    connection.execute("COMMIT")
+    for candidate in candidates:
+        contact_id, is_new = upsert_contact(connection, candidate, now)
+        counts["added" if is_new else "already_present"] += 1
+        if list_identifier is not None and join_list(connection, contact_id, list_identifier, now):
+            counts["memberships_added"] += 1
+        for tag in (*tags, *candidate.tags):
+            counts["tags_added"] += add_tag(connection, contact_id, tag)
     return ImportCounts(**counts)
 
 
-def contact_by_email(connection: sqlite3.Connection, email: str) -> int:
-    row = connection.execute(
-        "SELECT id FROM contact WHERE email = ?", (email.strip().lower(),)
-    ).fetchone()
+def contact_by_ref(connection: sqlite3.Connection, ref: str | int) -> int:
+    """A contact's id from its email address, or from its id (an int, or digits as text)."""
+    if isinstance(ref, int) or str(ref).isdigit():
+        row = connection.execute("SELECT id FROM contact WHERE id = ?", (int(ref),)).fetchone()
+    else:
+        row = connection.execute(
+            "SELECT id FROM contact WHERE email = ?", (str(ref).strip().lower(),)
+        ).fetchone()
     if row is None:
-        raise ContactsError("no contact with that address. Run: mailerlm contacts find")
+        raise ContactsNotFound("no such contact. Run: mailerlm contacts find")
     return row[0]
+
+
+def edit_contact(
+    connection: sqlite3.Connection,
+    contact_id: int,
+    email: str | None,
+    name: str,
+    linkedin_url: str | None,
+) -> None:
+    email = (email or "").strip().lower() or None
+    linkedin_url = (linkedin_url or "").strip() or None
+    if not email and not linkedin_url:
+        raise ContactsError("a contact needs an email or a LinkedIn URL")
+    try:
+        connection.execute(
+            "UPDATE contact SET email = ?, name = ?, linkedin_url = ? WHERE id = ?",
+            (email, name.strip(), linkedin_url, contact_id),
+        )
+    except sqlite3.IntegrityError as error:
+        raise ContactsError("another contact already has that email or LinkedIn URL") from error
+
+
+def delete_contact(connection: sqlite3.Connection, contact_id: int) -> None:
+    connection.execute("DELETE FROM contact WHERE id = ?", (contact_id,))
+
+
+def rename_list(
+    connection: sqlite3.Connection,
+    name: str,
+    new_name: str,
+    sender_name: str | None,
+    sender_address: str | None,
+) -> None:
+    identifier = list_id(connection, name)
+    new_name = new_name.strip()
+    if not new_name:
+        raise ContactsError("a list needs a name")
+    try:
+        connection.execute(
+            "UPDATE mailing_list SET name = ?, sender_name = ?, sender_address = ? WHERE id = ?",
+            (
+                new_name,
+                (sender_name or "").strip() or None,
+                (sender_address or "").strip() or None,
+                identifier,
+            ),
+        )
+    except sqlite3.IntegrityError as error:
+        raise ContactsError(f"a list named '{new_name}' already exists") from error
+
+
+def delete_list(connection: sqlite3.Connection, name: str) -> None:
+    connection.execute("DELETE FROM mailing_list WHERE id = ?", (list_id(connection, name),))
 
 
 def leave_list(connection: sqlite3.Connection, contact_id: int, list_identifier: int) -> bool:
@@ -210,6 +263,7 @@ def find(
         ]
         out.append(
             {
+                "id": contact_id,
                 "email": email,
                 "name": name,
                 "linkedin_url": linkedin_url,
@@ -241,6 +295,8 @@ def lists_summary(connection: sqlite3.Connection) -> list[dict]:
                 "name": name,
                 "members": members,
                 "by_status": by_status,
+                "sender_name": sender_name or "",
+                "sender_address": sender_address or "",
                 "sender_override": bool(sender_name or sender_address),
             }
         )

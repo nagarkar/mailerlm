@@ -20,7 +20,7 @@ Never imports: cli (enforced by the import contract "api below cli" in pyproject
 
 `src/mailerlm/campaigns/__init__.py`
 
-Campaigns: a Markdown file with front matter becomes an email.
+Campaigns: the letters you send, kept in the database and edited in the web app.
 
 Never imports: delivery, inbox, linkedin (enforced by the import contract "domain below
 
@@ -89,6 +89,14 @@ Never imports: delivery, inbox (enforced by the import contract "channels apart"
 `src/mailerlm/paths.py`
 
 Paths: where mailerlm's files live (metalm coding.md, "Where .env lives").
+
+## `mailerlm.server`
+
+`src/mailerlm/server.py`
+
+The review server: the web app on this Mac's loopback address, fronted by `tailscale serve`.
+
+Never imports: cli (enforced by the import contract "surfaces on top" in pyproject.toml).
 
 ## `mailerlm.store`
 

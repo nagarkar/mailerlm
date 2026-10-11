@@ -9,18 +9,16 @@ reply-to-unsubscribe line.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
+from jinja2 import StrictUndefined
 from jinja2.sandbox import SandboxedEnvironment
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
 from mailerlm.campaigns import images
-from mailerlm.campaigns.frontmatter import Campaign
 
-TEMPLATE_DIRECTORY = Path(__file__).parent / "templates"
 STYLES = {
     "p": "margin:0 0 16px;line-height:1.55;",
     "h1": "margin:24px 0 12px;font-size:24px;line-height:1.25;",
@@ -144,64 +142,69 @@ def _body_environment() -> SandboxedEnvironment:
 
 
 def render(
-    campaign: Campaign,
-    campaign_directory: Path,
-    book_title: str,
+    subject: str,
+    body: str,
+    preview_text: str,
+    frame_html: str,
+    frame_text: str,
+    variables: dict[str, str],
     sender_name: str,
     postal_address: str,
     reply_to: str,
+    resolve_image: Callable[[str], bytes | None],
     image_budget_bytes: int,
-    image_cache_directory: Path,
     first_name: str = "there",
-    allowed_root: Path | None = None,
 ) -> RenderedEmail:
+    """Everything is passed in; nothing is read from disk. `resolve_image(name)` returns the bytes of
+    the campaign's image of that name, or None."""
     warnings: list[str] = []
+    placeholders = {**variables, "first_name": first_name, "sender_name": sender_name}
+    for key, value in variables.items():
+        if not value.strip():
+            warnings.append(f"the value '{key}' is empty")
     try:
-        placeholders = dict(first_name=first_name, book_title=book_title, sender_name=sender_name)
-        body_environment = _body_environment()
-        body = body_environment.from_string(campaign.body).render(**placeholders)
-        subject = body_environment.from_string(campaign.subject).render(**placeholders)
+        text_environment = _body_environment()
+        body = text_environment.from_string(body).render(**placeholders)
+        subject = text_environment.from_string(subject).render(**placeholders)
+        preview_text = text_environment.from_string(preview_text).render(**placeholders)
     except Exception as error:  # jinja raises several types for a bad placeholder
         raise RenderError(
-            f"the subject or body uses an unknown placeholder or bad syntax ({error})"
+            f"the subject, preview or body uses an unknown value or bad syntax ({error})"
         ) from error
     markdown = _markdown()
     tokens = markdown.parse(body)
-    root = (allowed_root or campaign_directory).resolve()
-    inline_images: list[InlineImage] = []
-    sources: list[tuple[Token, Path]] = []
+    sources: list[tuple[Token, str]] = []
     for token in tokens:
         for child in token.children or []:
             if child.type == "image":
-                source = str(child.attrGet("src") or "")
-                if "://" in source or source.startswith("data:"):
+                name = str(child.attrGet("src") or "")
+                if "://" in name or name.startswith("data:"):
                     raise RenderError(
-                        f"image '{source[:40]}' is a web address; use a local file next to the campaign"
+                        f"image '{name[:40]}' is a web address; upload the picture to this campaign instead"
                     )
-                path = (campaign_directory / source).resolve()
-                if root not in path.parents and path != root:
-                    raise RenderError(f"image '{source}' is outside the campaign folder")
-                if not path.is_file():
-                    raise RenderError(f"image '{source}' does not exist next to the campaign")
+                if resolve_image(name) is None:
+                    raise RenderError(f"image '{name}' is not uploaded to this campaign")
                 if not child.content.strip():
-                    warnings.append(f"image '{source}' has no alt text")
-                sources.append((child, path))
+                    warnings.append(f"image '{name}' has no alt text")
+                sources.append((child, name))
     per_image_budget = image_budget_bytes // max(len(sources), 1)
-    seen: dict[Path, tuple[str, images.PreparedImage]] = {}
-    for child, path in sources:
-        if path not in seen:
+    seen: dict[str, tuple[str, images.PreparedImage]] = {}
+    inline_images: list[InlineImage] = []
+    for child, name in sources:
+        if name not in seen:
+            data = resolve_image(name) or b""
             try:
-                prepared = images.prepare_cached(path, per_image_budget, image_cache_directory)
+                prepared = images.prepare_cached(data, per_image_budget)
             except images.ImageTooLarge as error:
-                raise RenderError(f"image '{path.name}': {error}") from error
+                raise RenderError(f"image '{name}': {error}") from error
             content_id = f"image{len(seen) + 1}"
-            seen[path] = (content_id, prepared)
+            seen[name] = (content_id, prepared)
             inline_images.append(
                 InlineImage(
                     content_id, f"{content_id}.{prepared.extension}", prepared.mime, prepared.data
                 )
             )
-        content_id, prepared = seen[path]
+        content_id, prepared = seen[name]
         child.attrSet("src", f"cid:{content_id}")
         child.attrSet("width", str(prepared.display_width))
         child.attrSet("height", str(prepared.display_height))
@@ -209,32 +212,37 @@ def render(
     _style_tokens(tokens)
     body_html = markdown.renderer.render(tokens, markdown.options, {})
     body_text = _text_of(tokens)
-    unsubscribe_mailto = f"mailto:{reply_to}?subject=unsubscribe" if reply_to else ""
     context = {
         "subject": subject,
-        "preview_text": campaign.preview_text,
+        "preview_text": preview_text,
         "body_html": body_html,
         "body_text": body_text,
-        "postal_address": postal_address or "[postal address not set in config.toml]",
+        "postal_address": postal_address or "[postal address not set]",
         "unsubscribe_line": "Reply UNSUBSCRIBE to this email and I will take you off the list.",
         "sender_name": sender_name,
     }
     if not postal_address:
-        warnings.append("config.toml has no sender.postal_address; a real send needs it")
+        warnings.append("no postal address set (Settings or this campaign); a real send needs one")
     if not reply_to:
-        warnings.append("config.toml has no sender.reply_to; unsubscribe by reply cannot work")
-    environment = Environment(
-        loader=FileSystemLoader(TEMPLATE_DIRECTORY),
-        autoescape=select_autoescape(["html"]),
-        undefined=StrictUndefined,
-    )
-    html_out = environment.get_template("base.html.j2").render(**context)
-    text_out = environment.get_template("base.txt.j2").render(**context)
+        warnings.append("no reply-to address set; unsubscribe by reply cannot work")
+    try:
+        html_out = (
+            SandboxedEnvironment(autoescape=True, undefined=StrictUndefined)
+            .from_string(frame_html)
+            .render(**context)
+        )
+        text_out = (
+            SandboxedEnvironment(autoescape=False, undefined=StrictUndefined)
+            .from_string(frame_text)
+            .render(**context)
+        )
+    except Exception as error:  # a template the owner edited
+        raise RenderError(f"the template has a problem ({error})") from error
     return RenderedEmail(
         subject=subject,
         html=html_out,
         text=text_out,
         images=tuple(inline_images),
-        unsubscribe_mailto=unsubscribe_mailto,
+        unsubscribe_mailto=f"mailto:{reply_to}?subject=unsubscribe" if reply_to else "",
         warnings=tuple(warnings),
     )

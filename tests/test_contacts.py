@@ -93,3 +93,26 @@ def test_a_failed_import_rolls_back_everything(workspace):
 def test_a_linkedin_only_contact_is_allowed(workspace):
     api.contacts_add(linkedin_url="https://www.linkedin.com/in/someone")
     assert api.contacts_find()["contacts"][0]["email"] == "(no email)"
+
+
+def test_contacts_are_edited_and_removed_by_id_and_lists_renamed(workspace):
+    api.lists_add("a")
+    api.contacts_add(email="ada@example.com", name="Ada", list_name="a")
+    row = api.contacts_find(show_full_addresses=True)["contacts"][0]
+    api.contacts_edit(row["id"], "ada@new.example.com", "Ada L", None)
+    api.contacts_tag(row["id"], "x")
+    again = api.contacts_find(show_full_addresses=True)["contacts"][0]
+    assert (
+        again["email"] == "ada@new.example.com"
+        and again["name"] == "Ada L"
+        and again["tags"] == ["x"]
+    )
+    api.lists_edit("a", "b", sender_name="Bea")
+    assert (
+        api.lists_show()["lists"][0]["name"] == "b"
+        and api.lists_show()["lists"][0]["sender_name"] == "Bea"
+    )
+    api.contacts_delete(row["id"])
+    assert api.contacts_find()["count"] == 0
+    api.lists_delete("b")
+    assert api.lists_show()["lists"] == []

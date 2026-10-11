@@ -36,7 +36,7 @@ def test_help_lists_every_leaf(capsys):
 
 
 def test_every_leaf_resolves_to_an_api_function_or_a_surface_verb():
-    surface = {"help", "completion"}
+    surface = {"help", "completion", "serve"}
     for leaf in leaf_parsers(cli.build_parser()):
         name = leaf.get_default("api")
         assert name in surface or callable(getattr(api, name)), leaf.prog

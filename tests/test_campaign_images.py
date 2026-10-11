@@ -73,10 +73,6 @@ def test_an_impossible_budget_names_the_budget():
         images.prepare(encode(noise, "PNG"), 500)
 
 
-def test_the_cache_serves_the_second_call(tmp_path):
-    source = tmp_path / "a.png"
-    source.write_bytes(encode(photo(800, 600), "PNG"))
-    first = images.prepare_cached(source, 60 * 1024, tmp_path / "cache")
-    source.write_bytes(source.read_bytes())  # same bytes
-    second = images.prepare_cached(source, 60 * 1024, tmp_path / "cache")
-    assert first == second and any((tmp_path / "cache").iterdir())
+def test_the_same_bytes_and_budget_are_prepared_once():
+    data = encode(photo(800, 600), "PNG")
+    assert images.prepare_cached(data, 60 * 1024) is images.prepare_cached(data, 60 * 1024)

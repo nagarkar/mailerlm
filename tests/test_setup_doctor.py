@@ -49,7 +49,7 @@ def test_a_pointer_set_outside_the_block_is_left_alone(env_file, tmp_path):
 
 
 def test_doctor_fails_without_a_workspace_and_names_the_fix():
-    board = api.doctor()
+    board = api.doctor(web_app_health=lambda: None)
     assert board["ok"] is False
     failed = [c for c in board["checks"] if c["state"] == "fail"]
     assert failed and "mailerlm setup" in failed[0]["fix"]
@@ -58,7 +58,7 @@ def test_doctor_fails_without_a_workspace_and_names_the_fix():
 def test_doctor_passes_after_setup(env_file, tmp_path, monkeypatch):
     run_setup(env_file, tmp_path)
     monkeypatch.setenv("MAILERLM_WORKSPACE", str(tmp_path / "ws"))
-    board = api.doctor(config_file=tmp_path / "none.toml")
+    board = api.doctor(config_file=tmp_path / "none.toml", web_app_health=lambda: None)
     assert board["ok"] is True
     assert any(
         c["name"] == "env file" and "chosen by MAILERLM_ENV" in c["detail"] for c in board["checks"]
@@ -70,3 +70,27 @@ def test_an_exported_workspace_pointer_wins_over_the_default(env_file, tmp_path,
     api.setup(env_file=env_file)
     assert f"MAILERLM_WORKSPACE={tmp_path / 'exported'}" in env_file.read_text()
     assert (tmp_path / "exported" / paths.DATABASE_FILENAME).exists()
+
+
+def test_doctor_reports_a_web_app_older_than_the_code(monkeypatch):
+    from datetime import datetime, timedelta
+
+    monkeypatch.setattr(
+        api, "_newest_source_commit", lambda: datetime.fromisoformat("2026-10-11T12:00:00+00:00")
+    )
+    stale = {
+        "started_at": (
+            datetime.fromisoformat("2026-10-11T12:00:00+00:00") - timedelta(hours=1)
+        ).isoformat()
+    }
+    web = next(
+        c for c in api.doctor(web_app_health=lambda: stale)["checks"] if c["name"] == "web app"
+    )
+    assert (
+        web["state"] == "fail" and "older than HEAD" in web["detail"] and "kickstart" in web["fix"]
+    )
+    fresh = {"started_at": "2026-10-11T13:00:00+00:00"}
+    web = next(
+        c for c in api.doctor(web_app_health=lambda: fresh)["checks"] if c["name"] == "web app"
+    )
+    assert web["state"] == "ok"
