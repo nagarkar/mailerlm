@@ -1,4 +1,4 @@
-# Copy to <workspace>/config.toml (outside git). Everything identifying the owner lives only there.
+# Copy to config.toml in the checkout (gitignored). Everything identifying the owner lives only there.
 [book]
 title = "Your Book Title"
 
