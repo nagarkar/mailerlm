@@ -9,6 +9,7 @@ description = "Mailing list and campaign tool for an author; code only, data sta
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "corpuslm @ git+https://github.com/nagarkar/corpuslm@251bf9794cf9ed34eb0a6b6dfda6b284c9a9c08c",
   "httpx>=0.28",
   "pillow>=11.0",
   "markdown-it-py>=3.0",
@@ -80,3 +81,19 @@ name = "contacts at the bottom"
 type = "forbidden"
 source_modules = ["mailerlm.contacts"]
 forbidden_modules = ["mailerlm.consent", "mailerlm.campaigns"]
+
+[[tool.importlinter.contracts]]
+name = "surfaces on top"
+type = "forbidden"
+source_modules = [
+  "mailerlm.api", "mailerlm.config", "mailerlm.errors", "mailerlm.paths", "mailerlm.store",
+  "mailerlm.contacts", "mailerlm.consent", "mailerlm.campaigns", "mailerlm.delivery",
+  "mailerlm.inbox", "mailerlm.linkedin",
+]
+forbidden_modules = ["mailerlm.cli"]
+
+[[tool.importlinter.contracts]]
+name = "foundations import nothing above them"
+type = "forbidden"
+source_modules = ["mailerlm.config", "mailerlm.errors", "mailerlm.paths", "mailerlm.store"]
+forbidden_modules = ["mailerlm.api", "mailerlm.cli"]

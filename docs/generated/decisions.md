@@ -8,7 +8,7 @@ Rules that span modules, from each package's `Decisions:`. Owner rules end with 
 
 - `mailerlm`: A live send is the owner's act, from the review page or `mailerlm send --yes` in the owner's terminal; agents only dry-run and test-send to the owner's own address. (owner)
 - `mailerlm`: Campaigns do not track opens or clicks unless the campaign sets the flag; the stats page says opens are unreliable. (owner)
-- `mailerlm`: Nothing that identifies the owner enters git: book title, sender domain and address, postal address and contact data are workspace config, and the repo ships placeholders (`config.example.toml`, `.env.example`). Why: the repo is public. (owner)
+- `mailerlm`: Nothing that identifies the owner enters git: book title, sender domain and address and the postal address live in the gitignored `config.toml` (metalm: config stays in the checkout), contact data and keys in the workspace and `.env`, and the repo ships placeholders (`config.example.toml`, `.env.example`). Why: the repo is public. (owner)
 - `mailerlm.campaigns`: Images ride inside the message as inline (CID) attachments, so no public hosting is needed. Each image is resized to email width (about 600 px, with a 2x copy), compressed to a size budget and converted to a format every client renders (JPEG for photos, PNG for line art; WebP and AVIF are converted), cached by content hash. (owner)
 - `mailerlm.campaigns`: Markdown supports images, tables and the standard elements; raw HTML blocks are not allowed. (owner)
 - `mailerlm.campaigns`: Open and click tracking default to off; `track_clicks: true` in the front matter turns clicks on. (owner)
@@ -28,6 +28,7 @@ Rules that span modules, from each package's `Decisions:`. Owner rules end with 
 - `mailerlm.inbox`: mailerlm has its own OAuth client and token with `gmail.readonly`; no other repo's token is reused. (owner)
 - `mailerlm.linkedin`: Nothing in this repo touches LinkedIn automatically: no scraping, no browser automation, no API messaging. The owner pastes and sends every message. Why: LinkedIn's terms ban automation and restrict accounts that use it. (owner)
 - `mailerlm.linkedin`: Statuses: `interested`, `asked-for-email`, `emailed`, `confirmed`; a contact who gives an address enters the double opt-in flow. (owner)
+- `mailerlm.store`: Only `initialize` creates a database; `open_store` on a missing file is an error that names `mailerlm setup`. Why: a silently created empty store hides a wrong workspace pointer. (owner)
 
 ## Agent-drafted
 
