@@ -10,12 +10,15 @@ from __future__ import annotations
 import difflib
 import os
 import shutil
+import sqlite3
+import sys
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from mailerlm import config, paths, store
+from mailerlm.contacts import mask_email, parsing, repository
 from mailerlm.errors import MailerlmError
 from mailerlm.inbox import gmail
 
@@ -207,3 +210,183 @@ def gmail_connect() -> Board:
     except gmail.GmailNotConfigured as error:
         raise MailerlmError(f"{error}. Add them to .env (see .env.example)") from error
     return {"token": str(path), "scope": gmail.SCOPES[0], "next": "Run: mailerlm doctor"}
+
+
+# ---- contacts and lists ------------------------------------------------------------------
+
+
+def _open(dry_run: bool) -> sqlite3.Connection:
+    """The store; for a dry run an in-memory copy, so the change is real but nothing persists."""
+    live = store.open_store(paths.database_path(paths.workspace_path()))
+    if not dry_run:
+        return live
+    copy = sqlite3.connect(":memory:", isolation_level=None)
+    live.backup(copy)
+    live.close()
+    copy.execute("PRAGMA foreign_keys = ON")
+    return copy
+
+
+def _guard(work: Callable[[], Board]) -> Board:
+    try:
+        return work()
+    except repository.ContactsError as error:
+        raise MailerlmError(str(error)) from error
+
+
+def lists_add(
+    name: str,
+    sender_name: str | None = None,
+    sender_address: str | None = None,
+    dry_run: bool = False,
+) -> Board:
+    """Create a list, optionally with its own sender (otherwise config's sender is used)."""
+
+    def work() -> Board:
+        connection = _open(dry_run)
+        created = repository.add_list(connection, name, sender_name, sender_address)
+        connection.close()
+        return {
+            "dry_run": dry_run,
+            "list": name,
+            "created": created,
+            "next": f"Run: mailerlm contacts import <file> --list {name}",
+        }
+
+    return _guard(work)
+
+
+def lists_show() -> Board:
+    connection = _open(False)
+    summary = repository.lists_summary(connection)
+    connection.close()
+    return {
+        "lists": summary,
+        "next": "Run: mailerlm lists add <name>"
+        if not summary
+        else "Run: mailerlm contacts find --list <name>",
+    }
+
+
+def contacts_add(
+    email: str | None = None,
+    name: str = "",
+    linkedin_url: str | None = None,
+    list_name: str | None = None,
+    tags: tuple[str, ...] = (),
+    dry_run: bool = False,
+) -> Board:
+    """Add one contact (an email, a LinkedIn URL, or both) and optionally join a list."""
+
+    def work() -> Board:
+        text = " ".join(part for part in (name and f"{name}:", email, linkedin_url) if part)
+        candidates, _ = parsing.parse(text)
+        if not candidates:
+            raise MailerlmError(
+                "give an email or a LinkedIn profile URL. Run: mailerlm help contacts add"
+            )
+        connection = _open(dry_run)
+        counts = repository.import_candidates(connection, candidates[:1], list_name, tags)
+        connection.close()
+        return {"dry_run": dry_run, **_counts(counts), "next": "Run: mailerlm contacts find"}
+
+    return _guard(work)
+
+
+def _counts(counts: repository.ImportCounts) -> Board:
+    return {name: getattr(counts, name) for name in counts.__slots__}
+
+
+def contacts_import(
+    source: str,
+    list_name: str | None = None,
+    tags: tuple[str, ...] = (),
+    dry_run: bool = False,
+) -> Board:
+    """Import pasted text or a CSV from a file (`-` reads standard input)."""
+
+    def work() -> Board:
+        text = sys.stdin.read() if source == "-" else Path(source).expanduser().read_text()
+        candidates, rejected_lines = parsing.parse(text)
+        connection = _open(dry_run)
+        counts = repository.import_candidates(connection, candidates, list_name, tags)
+        connection.close()
+        return {
+            "dry_run": dry_run,
+            "read": len(candidates),
+            **_counts(counts),
+            "rejected_line_numbers": rejected_lines,
+            "next": "Run: mailerlm contacts find" + (f" --list {list_name}" if list_name else ""),
+        }
+
+    return _guard(work)
+
+
+def contacts_find(
+    list_name: str | None = None,
+    tag: str | None = None,
+    status: str | None = None,
+    show_full_addresses: bool = False,
+) -> Board:
+    def work() -> Board:
+        connection = _open(False)
+        rows = repository.find(connection, list_name, tag, status)
+        connection.close()
+        for row in rows:
+            row["email"] = row["email"] if show_full_addresses else mask_email(row["email"])
+            row["linkedin_url"] = row["linkedin_url"] and "(linkedin)"
+        return {"count": len(rows), "contacts": rows, "next": "Run: mailerlm lists show"}
+
+    return _guard(work)
+
+
+def _change(
+    email: str, dry_run: bool, action: Callable[[sqlite3.Connection, int], bool], verb: str
+) -> Board:
+    def work() -> Board:
+        connection = _open(dry_run)
+        connection.execute("BEGIN")
+        try:
+            changed = action(connection, repository.contact_by_email(connection, email))
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+        connection.execute("COMMIT")
+        connection.close()
+        return {"dry_run": dry_run, verb: changed, "next": "Run: mailerlm contacts find"}
+
+    return _guard(work)
+
+
+def contacts_tag(email: str, tag: str, dry_run: bool = False) -> Board:
+    return _change(email, dry_run, lambda c, i: repository.add_tag(c, i, tag), "tag_added")
+
+
+def contacts_untag(email: str, tag: str, dry_run: bool = False) -> Board:
+    return _change(email, dry_run, lambda c, i: repository.remove_tag(c, i, tag), "tag_removed")
+
+
+def contacts_join(email: str, list_name: str, dry_run: bool = False) -> Board:
+    return _change(
+        email,
+        dry_run,
+        lambda c, i: repository.join_list(c, i, repository.list_id(c, list_name)),
+        "joined",
+    )
+
+
+def contacts_leave(email: str, list_name: str, dry_run: bool = False) -> Board:
+    return _change(
+        email,
+        dry_run,
+        lambda c, i: repository.leave_list(c, i, repository.list_id(c, list_name)),
+        "left",
+    )
+
+
+def contacts_do_not_mail(email: str, clear: bool = False, dry_run: bool = False) -> Board:
+    def action(connection: sqlite3.Connection, contact_id: int) -> bool:
+        repository.set_do_not_mail(connection, contact_id, not clear)
+        return True
+
+    return _change(email, dry_run, action, "do_not_mail_cleared" if clear else "do_not_mail_set")

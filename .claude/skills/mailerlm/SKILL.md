@@ -10,6 +10,14 @@ Verbs today (more arrive with the implementation issues; each prints a board, `-
 - `mailerlm setup [--dry-run]`: writes the workspace pointer in the managed block of `.env`, creates the workspace and database.
 - `mailerlm doctor`: checks the environment; exits 1 when a required check fails.
 - `mailerlm gmail connect`: owner's act; opens a browser for readonly consent and stores the token.
+- `mailerlm lists add <name> [--sender-name N --sender-address A] [--dry-run]`, `mailerlm lists show`: lists and their member counts by status.
+- `mailerlm contacts import <file|-> [--list L] [--tag T] [--dry-run]`: pasted text ('Name: email', 'Name <email>', LinkedIn URLs) or a CSV with an email header; re-import adds nothing.
+- `mailerlm contacts add --email E [--name N] [--linkedin-url U] [--list L]`: one contact.
+- `mailerlm contacts tag <email> <tag>` and `mailerlm contacts untag <email> <tag>`.
+- `mailerlm contacts join <email> <list>` and `mailerlm contacts leave <email> <list>`: a joined contact starts `imported` and is not mailed.
+- `mailerlm contacts do-not-mail <email> [--clear]`: the global block.
+- Every mutating verb takes `--dry-run`.
+- `mailerlm contacts find [--list L] [--tag T] [--status S]`: addresses are masked; `--show-full-addresses` is for the owner's own terminal, agents never use it.
 - `mailerlm help [verb]`, `mailerlm completion bash`.
 
 Rules that already hold:

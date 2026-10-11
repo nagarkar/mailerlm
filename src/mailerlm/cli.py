@@ -9,6 +9,7 @@ in pyproject.toml).
 
 from __future__ import annotations
 
+import inspect
 import json
 import sys
 
@@ -22,6 +23,19 @@ HELP_FOOTER = (
     "Keys and the workspace pointer live in .env (see .env.example); 'mailerlm setup' writes the pointer.",
     "Every verb prints a board; contacts and messages stay in the workspace, never on stdout.",
 )
+
+
+def _mutating(parser) -> None:
+    parser.add_argument(
+        "--dry-run", action="store_true", dest="dry_run", help="show the counts; write nothing"
+    )
+
+
+def _list_and_tags(parser) -> None:
+    parser.add_argument("--list", dest="list_name", help="join this list")
+    parser.add_argument(
+        "--tag", dest="tags", action="append", default=[], help="tag every contact (repeatable)"
+    )
 
 
 def build_parser() -> clikit.Parser:
@@ -61,6 +75,120 @@ def build_parser() -> clikit.Parser:
         "mailerlm gmail connect",
     )
 
+    lists = sub.add_parser("lists", help="mailing lists")
+    list_verbs = lists.add_subparsers(dest="subcommand", required=True)
+    lists_add = list_verbs.add_parser("add", help="create a list")
+    lists_add.add_argument("name")
+    lists_add.add_argument("--sender-name", help="override the sender name for this list")
+    lists_add.add_argument("--sender-address", help="override the sender address for this list")
+    _mutating(lists_add)
+    lists_add.set_defaults(api="lists_add")
+    clikit.describe(
+        lists_add,
+        "Create a list; a second add of the same name changes nothing.",
+        "mailerlm lists add book-interest",
+    )
+    lists_show = list_verbs.add_parser("show", help="every list with its member counts by status")
+    lists_show.set_defaults(api="lists_show")
+    clikit.describe(
+        lists_show,
+        "Show every list with its member counts by consent status.",
+        "mailerlm lists show",
+    )
+
+    contacts = sub.add_parser("contacts", help="people on your lists")
+    contact_verbs = contacts.add_subparsers(dest="subcommand", required=True)
+    add = contact_verbs.add_parser("add", help="add one contact")
+    add.add_argument("--email")
+    add.add_argument("--name", default="")
+    add.add_argument("--linkedin-url", dest="linkedin_url")
+    _list_and_tags(add)
+    _mutating(add)
+    add.set_defaults(api="contacts_add")
+    clikit.describe(
+        add,
+        "Add one contact by email, LinkedIn URL, or both; optionally join a list. New list members start as 'imported' and are not mailed.",
+        "mailerlm contacts add --email ada@example.com --name Ada --list book-interest",
+    )
+    imp = contact_verbs.add_parser("import", help="import pasted text or a CSV")
+    imp.add_argument("source", help="a file, or - for standard input")
+    _list_and_tags(imp)
+    _mutating(imp)
+    imp.set_defaults(api="contacts_import")
+    clikit.describe(
+        imp,
+        "Import lines like 'Name: email', 'Name <email>', a LinkedIn profile URL, or a CSV with an email header. Re-importing adds nothing.",
+        "mailerlm contacts import people.txt --list book-interest --dry-run",
+    )
+    find = contact_verbs.add_parser("find", help="find contacts (addresses masked)")
+    find.add_argument("--list", dest="list_name")
+    find.add_argument("--tag")
+    find.add_argument(
+        "--status", choices=["imported", "pending", "subscribed", "unsubscribed", "suppressed"]
+    )
+    find.add_argument(
+        "--show-full-addresses",
+        action="store_true",
+        dest="show_full_addresses",
+        help="print full addresses; for your own terminal",
+    )
+    find.set_defaults(api="contacts_find")
+    clikit.describe(
+        find,
+        "List contacts matching every filter, addresses masked unless --show-full-addresses.",
+        "mailerlm contacts find --list book-interest --status imported",
+    )
+    for verb, api_name, text, example in (
+        (
+            "tag",
+            "contacts_tag",
+            "Put a tag on a contact.",
+            "mailerlm contacts tag ada@example.com early-access",
+        ),
+        (
+            "untag",
+            "contacts_untag",
+            "Take a tag off a contact.",
+            "mailerlm contacts untag ada@example.com early-access",
+        ),
+    ):
+        leaf = contact_verbs.add_parser(verb, help=text.rstrip("."))
+        leaf.add_argument("email")
+        leaf.add_argument("tag")
+        _mutating(leaf)
+        leaf.set_defaults(api=api_name)
+        clikit.describe(leaf, text, example)
+    for verb, api_name, text, example in (
+        (
+            "join",
+            "contacts_join",
+            "Add a contact to a list as 'imported' (not mailed until they confirm).",
+            "mailerlm contacts join ada@example.com beta-readers",
+        ),
+        (
+            "leave",
+            "contacts_leave",
+            "Remove a contact from a list; their other lists are untouched.",
+            "mailerlm contacts leave ada@example.com beta-readers",
+        ),
+    ):
+        leaf = contact_verbs.add_parser(verb, help=text.split(";")[0].rstrip("."))
+        leaf.add_argument("email")
+        leaf.add_argument("list_name", metavar="list")
+        _mutating(leaf)
+        leaf.set_defaults(api=api_name)
+        clikit.describe(leaf, text, example)
+    blocked = contact_verbs.add_parser("do-not-mail", help="never mail this person, on any list")
+    blocked.add_argument("email")
+    blocked.add_argument("--clear", action="store_true", help="lift the block")
+    _mutating(blocked)
+    blocked.set_defaults(api="contacts_do_not_mail")
+    clikit.describe(
+        blocked,
+        "Set (or with --clear, lift) the global do-not-mail flag.",
+        "mailerlm contacts do-not-mail ada@example.com",
+    )
+
     help_verb = sub.add_parser("help", help="list verbs, or show one verb's options")
     help_verb.add_argument("topic", nargs="*", help="a verb, optionally with its subverb")
     help_verb.set_defaults(api="help")
@@ -89,6 +217,18 @@ def format_board(board: dict, as_json: bool) -> str:
             for check in value:
                 fix = f"  fix: {check['fix']}" if check.get("fix") else ""
                 lines.append(f"  {check['state']:<7} {check['name']}: {check['detail']}{fix}")
+        elif key == "lists":
+            lines.append("lists:")
+            for item in value:
+                lines.append(f"  {item['name']}: {item['members']} members {item['by_status']}")
+        elif key == "contacts":
+            lines.append("contacts:")
+            for row in value:
+                flag = " DO-NOT-MAIL" if row["do_not_mail"] else ""
+                linkedin = " linkedin" if row["linkedin_url"] else ""
+                lines.append(
+                    f"  {row['email']} {row['name']!r} lists={row['lists']} tags={row['tags']}{linkedin}{flag}"
+                )
         elif key == "env_diff":
             if value:
                 lines.append("env_diff:")
@@ -123,8 +263,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.api == "completion":
             print(clikit.bash_completion(parser, "mailerlm", ["mailerlm"], ("--json",)), end="")
             return 0
-        kwargs = {"dry_run": args.dry_run} if args.api == "setup" else {}
-        board = getattr(api, args.api)(**kwargs)
+        function = getattr(api, args.api)
+        kwargs = {
+            name: tuple(value) if isinstance(value, list) else value
+            for name, value in vars(args).items()
+            if name in inspect.signature(function).parameters
+        }
+        board = function(**kwargs)
     except MailerlmError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
