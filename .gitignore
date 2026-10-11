@@ -11,3 +11,5 @@ __pycache__/
 *.sqlite-shm
 .mailerlm/
 dist/
+config.toml
+.env.bak.*

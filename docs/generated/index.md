@@ -8,6 +8,14 @@
 
 mailerlm: a small mailing-list and campaign tool for an author.
 
+## `mailerlm.api`
+
+`src/mailerlm/api.py`
+
+The typed API: one function per CLI verb; the CLI is a logic-free surface over it.
+
+Never imports: cli (enforced by the import contract "api below cli" in pyproject.toml).
+
 ## `mailerlm.campaigns`
 
 `src/mailerlm/campaigns/__init__.py`
@@ -21,6 +29,14 @@ Never imports: delivery, inbox, linkedin (enforced by the import contract "domai
 `src/mailerlm/cli.py`
 
 The mailerlm command line: one verb per typed-API function (metalm cli.md).
+
+Never imports: nothing below it may import it (enforced by the import contract "surfaces on top"
+
+## `mailerlm.config`
+
+`src/mailerlm/config.py`
+
+Config: the strict reader of `config.toml` (desired behaviour across runs, never state).
 
 ## `mailerlm.consent`
 
@@ -46,6 +62,12 @@ Delivery: sending mail and reading back what happened to it.
 
 Never imports: inbox, linkedin (enforced by the import contract "channels apart" in
 
+## `mailerlm.errors`
+
+`src/mailerlm/errors.py`
+
+The one error type the command line turns into `error: <what>. <fix>` (metalm cli.md).
+
 ## `mailerlm.inbox`
 
 `src/mailerlm/inbox/__init__.py`
@@ -61,3 +83,15 @@ Never imports: delivery, linkedin (enforced by the import contract "channels apa
 LinkedIn: an assisted, manual tracker that moves people from LinkedIn onto the email list.
 
 Never imports: delivery, inbox (enforced by the import contract "channels apart" in
+
+## `mailerlm.paths`
+
+`src/mailerlm/paths.py`
+
+Paths: where mailerlm's files live (metalm coding.md, "Where .env lives").
+
+## `mailerlm.store`
+
+`src/mailerlm/store.py`
+
+Store: the one SQLite file in the workspace, and its migrations.

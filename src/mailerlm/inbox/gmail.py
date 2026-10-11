@@ -8,7 +8,7 @@ another repo's. The `flow_factory` argument lets tests run without a browser or 
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -24,10 +24,10 @@ def token_path(workspace: Path) -> Path:
     return workspace / TOKEN_FILE
 
 
-def client_config(env: dict[str, str] | None = None) -> dict[str, Any]:
-    env = os.environ if env is None else env
-    cid = env.get("GMAIL_CLIENT_ID", "").strip()
-    secret = env.get("GMAIL_CLIENT_SECRET", "").strip()
+def client_config(env: Mapping[str, str] | None = None) -> dict[str, Any]:
+    source: Mapping[str, str] = os.environ if env is None else env
+    cid = source.get("GMAIL_CLIENT_ID", "").strip()
+    secret = source.get("GMAIL_CLIENT_SECRET", "").strip()
     if not cid or not secret:
         raise GmailNotConfigured(
             "GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET are not set in .env (config names: "
@@ -53,7 +53,7 @@ def _installed_app_flow(config: dict[str, Any]) -> Any:
 
 def connect(
     workspace: Path,
-    env: dict[str, str] | None = None,
+    env: Mapping[str, str] | None = None,
     flow_factory: Callable[[dict[str, Any]], Any] = _installed_app_flow,
 ) -> Path:
     """Run the consent flow (opens a browser) and write the token; returns its path."""

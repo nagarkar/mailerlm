@@ -28,6 +28,7 @@ Rules that span modules, from each package's `Decisions:`. Owner rules end with 
 - `mailerlm.inbox`: mailerlm has its own OAuth client and token with `gmail.readonly`; no other repo's token is reused. (owner)
 - `mailerlm.linkedin`: Nothing in this repo touches LinkedIn automatically: no scraping, no browser automation, no API messaging. The owner pastes and sends every message. Why: LinkedIn's terms ban automation and restrict accounts that use it. (owner)
 - `mailerlm.linkedin`: Statuses: `interested`, `asked-for-email`, `emailed`, `confirmed`; a contact who gives an address enters the double opt-in flow. (owner)
+- `mailerlm.store`: Only `initialize` creates a database; `open_store` on a missing file is an error that names `mailerlm setup`. Why: a silently created empty store hides a wrong workspace pointer. (owner)
 
 ## Agent-drafted
 

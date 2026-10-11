@@ -5,7 +5,14 @@ description: House rules for driving mailerlm, the author's mailing-list and cam
 
 # mailerlm
 
-Stub: the CLI does not exist yet (verbs arrive with the implementation issues). Rules that already hold:
+Verbs today (more arrive with the implementation issues; each prints a board, `--json` for JSON):
+
+- `mailerlm setup [--dry-run]`: writes the workspace pointer in the managed block of `.env`, creates the workspace and database.
+- `mailerlm doctor`: checks the environment; exits 1 when a required check fails.
+- `mailerlm gmail connect`: owner's act; opens a browser for readonly consent and stores the token.
+- `mailerlm help [verb]`, `mailerlm completion bash`.
+
+Rules that already hold:
 
 - Contact data (emails, replies, the footer address) lives only in the private workspace; never print it in chat, issues, PRs or commits.
 - A live send is the owner's act (Send on the review page, or `mailerlm send <campaign> --yes` in the owner's own terminal). Agents run `--dry-run` and test sends to the owner's own address only.
