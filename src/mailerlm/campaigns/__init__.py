@@ -18,6 +18,15 @@ Decisions:
 - The footer carries the owner's postal address from config and the unsubscribe-by-reply line. (owner)
 - Open and click tracking default to off; `track_clicks: true` in the front matter turns clicks on. (owner)
 
+- A campaign file lives in the workspace under `campaigns/<name>.md`; `campaigns new` copies a
+  starter (confirmation, update, early-access, launch) there and never overwrites. Preview files
+  are derived output under `previews/`. (owner)
+- A campaign reaches `subscribed` members of its lists who carry every tag it names; a
+  `confirmation` campaign reaches `imported` members instead. Do-not-mail contacts and contacts
+  without an email are always skipped. (owner)
+- The sum of a campaign's inline images stays within `[caps].max_image_kilobytes_per_campaign`
+  (default 100 KB); a render that cannot meet it fails and names the image. (owner)
+
 Terms:
 - **campaign**: one Markdown file plus its front matter (subject, lists, tags, flags), sent once.
 - **template**: the HTML and text frame a campaign body is placed in.

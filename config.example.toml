@@ -11,6 +11,7 @@ postal_address = "Street, City, State ZIP"   # CAN-SPAM footer
 [caps]
 max_recipients_per_send = 50
 max_sends_per_day = 100
+max_image_kilobytes_per_campaign = 100   # all inline images together
 
 [classifier]
 model = "jev-latest"

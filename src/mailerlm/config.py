@@ -17,7 +17,11 @@ from mailerlm.errors import MailerlmError
 DEFAULTS: dict[str, dict[str, Any]] = {
     "book": {"title": ""},
     "sender": {"name": "", "address": "", "reply_to": "", "postal_address": ""},
-    "caps": {"max_recipients_per_send": 50, "max_sends_per_day": 100},
+    "caps": {
+        "max_recipients_per_send": 50,
+        "max_sends_per_day": 100,
+        "max_image_kilobytes_per_campaign": 100,
+    },
     "classifier": {
         "model": "jev-latest",
         "unsubscribe_min_probability": 0.80,

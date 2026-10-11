@@ -189,6 +189,51 @@ def build_parser() -> clikit.Parser:
         "mailerlm contacts do-not-mail ada@example.com",
     )
 
+    campaigns = sub.add_parser("campaigns", help="campaign files: new, list, check, preview")
+    campaign_verbs = campaigns.add_subparsers(dest="subcommand", required=True)
+    new = campaign_verbs.add_parser("new", help="start a campaign file from a starter")
+    new.add_argument("name")
+    new.add_argument(
+        "--starter", default="update", help="confirmation, update, early-access or launch"
+    )
+    _mutating(new)
+    new.set_defaults(api="campaigns_new")
+    clikit.describe(
+        new,
+        "Copy a starter into the workspace as campaigns/<name>.md; never overwrites an existing file.",
+        "mailerlm campaigns new october-update --starter update",
+    )
+    listing = campaign_verbs.add_parser("list", help="campaign files and starters")
+    listing.set_defaults(api="campaigns_list")
+    clikit.describe(
+        listing,
+        "List your campaign files and the starters you can copy.",
+        "mailerlm campaigns list",
+    )
+    check = campaign_verbs.add_parser(
+        "check", help="render a campaign and count who it would reach"
+    )
+    check.add_argument("name")
+    check.set_defaults(api="campaigns_check")
+    clikit.describe(
+        check,
+        "Validate the file, render it, check the images against the size budget and count who it would reach. Sends nothing.",
+        "mailerlm campaigns check october-update",
+    )
+    preview = campaign_verbs.add_parser(
+        "preview", help="write HTML and text previews to open in a browser"
+    )
+    preview.add_argument("name")
+    preview.add_argument(
+        "--first-name", dest="first_name", default="Friend", help="name used for {{ first_name }}"
+    )
+    preview.set_defaults(api="campaigns_preview")
+    clikit.describe(
+        preview,
+        "Write previews/<name>.html and .txt in the workspace with images inline.",
+        "mailerlm campaigns preview october-update",
+    )
+
     help_verb = sub.add_parser("help", help="list verbs, or show one verb's options")
     help_verb.add_argument("topic", nargs="*", help="a verb, optionally with its subverb")
     help_verb.set_defaults(api="help")
@@ -229,6 +274,9 @@ def format_board(board: dict, as_json: bool) -> str:
                 lines.append(
                     f"  {row['email']} {row['name']!r} lists={row['lists']} tags={row['tags']}{linkedin}{flag}"
                 )
+        elif key == "problems":
+            lines.append("problems:" if value else "problems: none")
+            lines += [f"  {item}" for item in value]
         elif key == "env_diff":
             if value:
                 lines.append("env_diff:")
