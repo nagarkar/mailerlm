@@ -1,0 +1,27 @@
+# metalm standard hooks (guidelines/design.md#generated-docs, guidelines/coding.md).
+# The owner approves this file once; after it is committed, agents run `pre-commit install`
+# in any checkout of the repo without asking. A new or changed hook is approved again.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: no-commit-to-branch   # branch for every change (guidelines/index.md)
+        args: [--branch, main]
+  - repo: https://github.com/astral-sh/ruff-pre-commit   # Python repos
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+      - id: ruff-format
+  - repo: https://github.com/nagarkar/metalm
+    rev: 58a5033cda569496ae50b0c3a3f3c59ae77b7d09   # update with: pre-commit autoupdate --bleeding-edge --repo https://github.com/nagarkar/metalm
+    hooks:
+      - id: metalm-gendocs   # regenerates docs/generated/; stops the commit when it changed files
+  - repo: local
+    hooks:
+      - id: import-contracts   # module map (guidelines/design.md#the-package-docstring)
+        name: import contracts
+        entry: .venv/bin/lint-imports
+        language: system
+        pass_filenames: false
+        types: [python]
+      # The repo's own hooks (media outside allowed folders, secrets) go here as local hooks.

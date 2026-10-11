@@ -1,0 +1,18 @@
+# Copy to <workspace>/config.toml (outside git). Everything identifying the owner lives only there.
+[book]
+title = "Your Book Title"
+
+[sender]
+name = "Your Name"
+address = "you@mail.example.com"      # a sending subdomain you control (SPF, DKIM, DMARC set)
+reply_to = "you+book@gmail.example"   # plus-address read by the inbox area
+postal_address = "Street, City, State ZIP"   # CAN-SPAM footer
+
+[caps]
+max_recipients_per_send = 50
+max_sends_per_day = 100
+
+[classifier]
+model = "jev-latest"
+unsubscribe_min_probability = 0.80
+confirm_min_probability = 0.95

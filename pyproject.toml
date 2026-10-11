@@ -1,0 +1,77 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mailerlm"
+version = "0.1.0"
+description = "Mailing list and campaign tool for an author; code only, data stays in a private workspace"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "httpx>=0.28",
+  "pillow>=11.0",
+  "markdown-it-py>=3.0",
+  "jsonschema>=4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.12",
+  "pyright>=1.1.400",
+  "pre-commit>=3.7",
+  "import-linter>=2.1",
+  "metalm-gendocs @ git+https://github.com/nagarkar/metalm@58a5033cda569496ae50b0c3a3f3c59ae77b7d09",
+]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mailerlm"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "cuj(journey): the critical user journey this end-to-end test proves (docs/generated/cujs.md)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]  # docstring rules are prose lines
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
+
+[tool.metalm-gendocs]
+src = "src"
+tests = "tests"
+out = "docs/generated"
+
+[tool.importlinter]
+root_package = "mailerlm"
+
+[[tool.importlinter.contracts]]
+name = "channels apart"
+type = "independence"
+modules = ["mailerlm.delivery", "mailerlm.inbox", "mailerlm.linkedin"]
+
+[[tool.importlinter.contracts]]
+name = "domain below channels"
+type = "forbidden"
+source_modules = ["mailerlm.contacts", "mailerlm.consent", "mailerlm.campaigns"]
+forbidden_modules = ["mailerlm.delivery", "mailerlm.inbox", "mailerlm.linkedin"]
+
+[[tool.importlinter.contracts]]
+name = "contacts at the bottom"
+type = "forbidden"
+source_modules = ["mailerlm.contacts"]
+forbidden_modules = ["mailerlm.consent", "mailerlm.campaigns"]
