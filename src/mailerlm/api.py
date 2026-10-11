@@ -199,9 +199,8 @@ def doctor(
         checks.append(
             _check(
                 "config",
-                "missing",
-                "no config.toml; defaults apply",
-                "Copy config.example.toml to config.toml and fill it in",
+                "ok",
+                "no config.toml; defaults apply (the file is optional: caps and thresholds only)",
             )
         )
     for key, what in (("RESEND_API_KEY", "sending"), ("TYPESAFE_API_KEY", "reply classifier")):
