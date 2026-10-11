@@ -16,4 +16,4 @@
 - **tag** (`mailerlm.contacts`): a free label on a contact, such as `early-access`, used to narrow a campaign's audience.
 - **template** (`mailerlm.campaigns`): the HTML and text frame a campaign body is placed in.
 - **value** (`mailerlm.campaigns`): a named piece of text a campaign substitutes into its subject and body, such as `book_title`.
-- **workspace** (`mailerlm`): the private directory holding the SQLite store, config, campaign files, images and token files.
+- **workspace** (`mailerlm`): the private directory holding the SQLite store (contacts, campaigns, templates, images), logs and token files.

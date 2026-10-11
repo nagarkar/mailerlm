@@ -7,14 +7,14 @@ committed. The store is one SQLite file in that workspace.
 
 Decisions:
 - Nothing that identifies the owner enters git: book title, sender domain and address and the
-  postal address live in the gitignored `config.toml` (metalm: config stays in the checkout),
-  contact data and keys in the workspace and `.env`, and the repo ships placeholders
-  (`config.example.toml`, `.env.example`). Why: the repo is public. (owner)
+  postal address, the campaigns and the contacts live in the private database, set in the web app.
+  Keys live in the gitignored `.env`, `config.toml` holds behaviour only, and the repo ships
+  placeholders (`config.example.toml`, `.env.example`). Why: the repo is public. (owner)
 - A live send is the owner's act, from the review page or `mailerlm send --yes` in the owner's
   terminal; agents only dry-run and test-send to the owner's own address. (owner)
 - Campaigns do not track opens or clicks unless the campaign sets the flag; the stats page says
   opens are unreliable. (owner)
 
 Terms:
-- **workspace**: the private directory holding the SQLite store, config, campaign files, images and token files.
+- **workspace**: the private directory holding the SQLite store (contacts, campaigns, templates, images), logs and token files.
 """

@@ -12,10 +12,11 @@ from __future__ import annotations
 import inspect
 import json
 import sys
+from datetime import datetime
 
 from corpuslm import clikit
 
-from mailerlm import api, paths
+from mailerlm import api, paths, server
 from mailerlm.errors import MailerlmError
 
 HELP_FOOTER = (
@@ -241,6 +242,17 @@ def build_parser() -> clikit.Parser:
         help_verb, "List every verb, or show one verb's options.", "mailerlm help setup"
     )
 
+    serve = sub.add_parser("serve", help="run the web app on this Mac")
+    serve.add_argument(
+        "--port", type=int, default=server.PORT, help=f"loopback port (default {server.PORT})"
+    )
+    serve.set_defaults(api="serve")
+    clikit.describe(
+        serve,
+        "Run the web app on 127.0.0.1 (the launch agent runs this; tailscale serve fronts it).",
+        "mailerlm serve --port 8782",
+    )
+
     completion = sub.add_parser("completion", help="print the bash completion script")
     completion.add_argument("shell", nargs="?", default="bash", choices=["bash"])
     completion.set_defaults(api="completion")
@@ -310,6 +322,15 @@ def main(argv: list[str] | None = None) -> int:
             text, code = clikit.help_text(parser, "mailerlm", args.topic, HELP_FOOTER)
             print(text, end="")
             return code
+        if args.api == "serve":
+            started = datetime.now().astimezone().isoformat(timespec="seconds")
+            httpd = server.make_server("127.0.0.1", args.port, started)
+            print(f"mailerlm web app on http://127.0.0.1:{args.port}/ (Ctrl-C to stop)", flush=True)
+            try:
+                httpd.serve_forever()
+            except KeyboardInterrupt:
+                pass
+            return 0
         if args.api == "completion":
             print(clikit.bash_completion(parser, "mailerlm", ["mailerlm"], ("--json",)), end="")
             return 0

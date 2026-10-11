@@ -8,7 +8,7 @@ Rules that span modules, from each package's `Decisions:`. Owner rules end with 
 
 - `mailerlm`: A live send is the owner's act, from the review page or `mailerlm send --yes` in the owner's terminal; agents only dry-run and test-send to the owner's own address. (owner)
 - `mailerlm`: Campaigns do not track opens or clicks unless the campaign sets the flag; the stats page says opens are unreliable. (owner)
-- `mailerlm`: Nothing that identifies the owner enters git: book title, sender domain and address and the postal address live in the gitignored `config.toml` (metalm: config stays in the checkout), contact data and keys in the workspace and `.env`, and the repo ships placeholders (`config.example.toml`, `.env.example`). Why: the repo is public. (owner)
+- `mailerlm`: Nothing that identifies the owner enters git: book title, sender domain and address and the postal address, the campaigns and the contacts live in the private database, set in the web app. Keys live in the gitignored `.env`, `config.toml` holds behaviour only, and the repo ships placeholders (`config.example.toml`, `.env.example`). Why: the repo is public. (owner)
 - `mailerlm.campaigns`: A campaign reaches `subscribed` members of its lists who carry every tag it names; a `confirmation` campaign reaches `imported` members instead. Do-not-mail contacts and contacts without an email are always skipped. (owner)
 - `mailerlm.campaigns`: A frame template must contain the place for the letter (`{{ body_html | safe }}` and `{{ body_text }}`); the built-in template can be edited and reset, not deleted. (owner)
 - `mailerlm.campaigns`: Campaigns, templates, settings and uploaded images live in the database, created and edited in the web app; the book title and every other value belong to the campaign (with defaults in Settings for the sender), never to `config.toml`. Why: the owner runs many campaigns and cannot edit a file for each. (owner)
@@ -31,6 +31,11 @@ Rules that span modules, from each package's `Decisions:`. Owner rules end with 
 - `mailerlm.inbox`: mailerlm has its own OAuth client and token with `gmail.readonly`; no other repo's token is reused. (owner)
 - `mailerlm.linkedin`: Nothing in this repo touches LinkedIn automatically: no scraping, no browser automation, no API messaging. The owner pastes and sends every message. Why: LinkedIn's terms ban automation and restrict accounts that use it. (owner)
 - `mailerlm.linkedin`: Statuses: `interested`, `asked-for-email`, `emailed`, `confirmed`; a contact who gives an address enters the double opt-in flow. (owner)
+- `mailerlm.server`: Errors answer `{error: message}`: 400 for a bad request, 404 for a missing thing, and for anything unexpected only the exception's type, never stored text. Enforced by: tests/test_server.py::test_an_unexpected_error_names_only_its_type. (owner)
+- `mailerlm.server`: Every POST and PUT passes one write check: header `X-Mailerlm`, Content-Type, Origin (when sent) equal to Host, and a size limit; there is no CORS, no cookie and no token, and OPTIONS is never answered. Enforced by: tests/test_server.py::test_the_write_check_rejects_a_bad_request. (owner)
+- `mailerlm.server`: One lock serialises every write, so two taps never interleave. (owner)
+- `mailerlm.server`: The JSON body is at most 64 KB. A picture upload is a raw `PUT` of at most 8 MB, the one exception, because a picture does not fit in 64 KB; it passes the same header and Origin checks. (owner)
+- `mailerlm.server`: The server binds the loopback address only and answers only Host headers that name this machine (loopback or `*.ts.net`), else 421. Enforced by: tests/test_server.py::test_a_foreign_host_gets_421. (owner)
 - `mailerlm.store`: Only `initialize` creates a database; `open_store` on a missing file is an error that names `mailerlm setup`. Why: a silently created empty store hides a wrong workspace pointer. (owner)
 
 ## Agent-drafted

@@ -95,7 +95,7 @@ def setup(
             shutil.copy2(env_file, backup)
             board["backup"] = str(backup)
         env_file.write_text("\n".join(new_lines) + "\n")
-    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "logs").mkdir(parents=True, exist_ok=True)
     store.initialize(database).close()
     board["workspace_exists"] = board["database_exists"] = True
     board["changed"] = changed
@@ -107,7 +107,38 @@ def _check(name: str, state: str, detail: str, fix: str = "", required: bool = F
     return {"name": name, "state": state, "detail": detail, "fix": fix, "required": required}
 
 
-def doctor(config_file: Path | None = None) -> Board:
+def _web_app_health(port: int = 8782) -> dict | None:
+    """The running web app's /health answer, or None when nothing answers."""
+    import json
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1) as response:
+            return json.loads(response.read())
+    except (OSError, ValueError):
+        return None
+
+
+def _newest_source_commit() -> datetime | None:
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "log", "-1", "--format=%cI", "--", "src"],
+            cwd=paths.project_dir(),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+        return datetime.fromisoformat(out) if out else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def doctor(
+    config_file: Path | None = None,
+    web_app_health: Callable[[], dict | None] = _web_app_health,
+) -> Board:
     """Each check with its state, detail and fix; `ok` is false when a required check fails."""
     checks: list[Board] = []
     env_file = paths.env_path()
@@ -201,6 +232,24 @@ def doctor(config_file: Path | None = None) -> Board:
             "" if token else "Run: mailerlm gmail connect",
         )
     )
+    health = web_app_health()
+    restart = "launchctl kickstart -k gui/$(id -u)/com.nagarkar.mailerlm.serve"
+    if health is None:
+        checks.append(
+            _check(
+                "web app",
+                "missing",
+                "nothing answers on 127.0.0.1:8782",
+                "Install the launch agent: see scripts/com.nagarkar.mailerlm.serve.plist",
+            )
+        )
+    else:
+        started = datetime.fromisoformat(health["started_at"])
+        newest = _newest_source_commit()
+        if newest is not None and started < newest:
+            checks.append(_check("web app", "fail", "server is older than HEAD", f"Run: {restart}"))
+        else:
+            checks.append(_check("web app", "ok", f"running since {health['started_at']}"))
     ok = all(c["state"] == "ok" for c in checks if c["required"])
     return {
         "ok": ok,
@@ -677,11 +726,22 @@ def campaigns_image_data(name: str, filename: str) -> tuple[bytes, str] | None:
 
 
 def _render(
-    connection: sqlite3.Connection, name: str, first_name: str
+    connection: sqlite3.Connection, name: str, first_name: str, draft: dict | None = None
 ) -> tuple[dict, render.RenderedEmail]:
+    """Render the saved campaign; `draft` fields (and `frame_html`/`frame_text`) overlay it unsaved."""
     campaign = campaigns_repository.campaign_get(connection, name)
     defaults = campaigns_repository.settings_get(connection)
     frame = campaigns_repository.template_get(connection, campaign["template"])
+    draft = draft or {}
+    if "frame_html" in draft:
+        frame = {**frame, "html": str(draft["frame_html"])}
+    if "frame_text" in draft:
+        frame = {**frame, "text": str(draft["frame_text"])}
+    for key in ("subject", "preview_text", "body", "sender_name", "postal_address", "reply_to"):
+        if key in draft and isinstance(draft[key], str):
+            campaign[key] = draft[key]
+    if isinstance(draft.get("variables"), dict):
+        campaign["variables"] = {str(k): str(v) for k, v in draft["variables"].items()}
     settings = config.load(paths.config_path())
 
     def pick(field: str) -> str:
@@ -743,13 +803,15 @@ def campaigns_check(name: str) -> Board:
     return _guard(work)
 
 
-def campaigns_preview(name: str, first_name: str = "Friend", write_files: bool = True) -> Board:
+def campaigns_preview(
+    name: str, first_name: str = "Friend", write_files: bool = True, draft: dict | None = None
+) -> Board:
     """The rendered email (images inline as data addresses). From the command line it is also
     written under the workspace's previews folder to open in a browser."""
 
     def work() -> Board:
         with _transaction() as connection:
-            _, email = _render(connection, name, first_name)
+            _, email = _render(connection, name, first_name, draft)
         page = email.html
         for image in email.images:
             uri = f"data:{image.mime};base64,{base64.b64encode(image.data).decode()}"

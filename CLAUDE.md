@@ -2,18 +2,20 @@
 
 @~/.claude/metalm/guidelines/index.md
 
-Mailing-list and campaign tool for one author: contacts and lists with double opt-in by reply, Markdown campaigns sent through Resend, replies read from Gmail and classified by Jev (TypeSafe), and an assisted LinkedIn tracker. Public code; all data stays in the private workspace. Depends on `corpuslm` (shared CLI helpers, pinned git URL in `pyproject.toml`), Resend, Gmail (readonly) and TypeSafe; reference patterns come from `ytlm` (TypeSafe adapter) and `supplylm` (Gmail).
+Mailing-list and campaign tool for one author: contacts and lists with double opt-in by reply, Markdown campaigns (stored in the database, edited in a web app on the tailnet) sent through Resend, replies read from Gmail and classified by Jev (TypeSafe), and an assisted LinkedIn tracker. Public code; all data stays in the private workspace. Depends on `corpuslm` (shared CLI helpers, pinned git URL in `pyproject.toml`), Resend, Gmail (readonly) and TypeSafe; reference patterns come from `ytlm` (TypeSafe adapter) and `supplylm` (Gmail).
 
 ## Commands
 
 - Install: `python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]" && .venv/bin/pre-commit install`
 - Test: `.venv/bin/pytest`
 - Lint: `.venv/bin/ruff check src tests`; format `.venv/bin/ruff format src tests`; types `.venv/bin/pyright`
-- CLI: `.venv/bin/mailerlm <verb>` (`setup`, `doctor`, `gmail connect`, `help`, `completion`); see `.claude/skills/mailerlm/SKILL.md`.
+- Web app: `.venv/bin/mailerlm serve` (real server on 127.0.0.1:8782 under a launch agent, `scripts/com.nagarkar.mailerlm.serve.plist`, proposed tailnet port 13443); throwaway copy: `scripts/sandbox_server.sh [port] [--fresh]`.
+- CLI: `.venv/bin/mailerlm <verb>` (`setup`, `doctor`, `gmail connect`, `lists`, `contacts`, `campaigns`, `serve`, `help`, `completion`); see `.claude/skills/mailerlm/SKILL.md`.
 
 ## Exceptions to metalm
 
-- None.
+- A picture upload is a raw `PUT` of up to 8 MB, not the 64 KB JSON limit: the `(owner)` rule in `src/mailerlm/server.py`.
+- Campaigns, templates and sender defaults are database rows edited in the web app, not checked-in config: the `(owner)` rule in `src/mailerlm/campaigns/__init__.py`.
 
 ## Agent skills
 

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  mailerlm's web app (src/mailerlm/server.py) on 127.0.0.1:8782, kept running by launchd and started at
+  login. __REPO__ and __HOME__ are placeholders (this repository is public); the install command fills them.
+  The owner installs it (metalm operations.md, launch agents):
+    sed -e "s|__REPO__|$PWD|g" -e "s|__HOME__|$HOME|g" scripts/com.nagarkar.mailerlm.serve.plist > ~/Library/LaunchAgents/com.nagarkar.mailerlm.serve.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.nagarkar.mailerlm.serve.plist
+  Put it on the tailnet (the owner's word only; one HTTPS port per app, 13443 is the proposed one):
+    tailscale serve --bg --https=13443 http://127.0.0.1:8782
+  Restart onto new code after every merge that touches src/:
+    launchctl kickstart -k gui/$(id -u)/com.nagarkar.mailerlm.serve
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.nagarkar.mailerlm.serve</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__REPO__/.venv/bin/mailerlm</string>
+    <string>serve</string>
+    <string>--port</string>
+    <string>8782</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>__HOME__/.mailerlm/logs/serve.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.mailerlm/logs/serve.log</string>
+</dict>
+</plist>

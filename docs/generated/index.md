@@ -90,6 +90,14 @@ Never imports: delivery, inbox (enforced by the import contract "channels apart"
 
 Paths: where mailerlm's files live (metalm coding.md, "Where .env lives").
 
+## `mailerlm.server`
+
+`src/mailerlm/server.py`
+
+The review server: the web app on this Mac's loopback address, fronted by `tailscale serve`.
+
+Never imports: cli (enforced by the import contract "surfaces on top" in pyproject.toml).
+
 ## `mailerlm.store`
 
 `src/mailerlm/store.py`

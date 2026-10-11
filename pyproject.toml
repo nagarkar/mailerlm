@@ -42,6 +42,7 @@ packages = ["src/mailerlm"]
 [tool.hatch.build.targets.wheel.force-include]
 "src/mailerlm/campaigns/templates" = "mailerlm/campaigns/templates"
 "src/mailerlm/campaigns/starters" = "mailerlm/campaigns/starters"
+"src/mailerlm/web" = "mailerlm/web"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -92,7 +93,7 @@ forbidden_modules = ["mailerlm.consent", "mailerlm.campaigns"]
 name = "surfaces on top"
 type = "forbidden"
 source_modules = [
-  "mailerlm.api", "mailerlm.config", "mailerlm.errors", "mailerlm.paths", "mailerlm.store",
+  "mailerlm.api", "mailerlm.server", "mailerlm.config", "mailerlm.errors", "mailerlm.paths", "mailerlm.store",
   "mailerlm.contacts", "mailerlm.consent", "mailerlm.campaigns", "mailerlm.delivery",
   "mailerlm.inbox", "mailerlm.linkedin",
 ]
