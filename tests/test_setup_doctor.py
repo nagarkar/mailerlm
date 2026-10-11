@@ -63,3 +63,10 @@ def test_doctor_passes_after_setup(env_file, tmp_path, monkeypatch):
     assert any(
         c["name"] == "env file" and "chosen by MAILERLM_ENV" in c["detail"] for c in board["checks"]
     )
+
+
+def test_an_exported_workspace_pointer_wins_over_the_default(env_file, tmp_path, monkeypatch):
+    monkeypatch.setenv("MAILERLM_WORKSPACE", str(tmp_path / "exported"))
+    api.setup(env_file=env_file)
+    assert f"MAILERLM_WORKSPACE={tmp_path / 'exported'}" in env_file.read_text()
+    assert (tmp_path / "exported" / paths.DATABASE_FILENAME).exists()

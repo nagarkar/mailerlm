@@ -7,6 +7,7 @@ Never imports: cli (enforced by the import contract "api below cli" in pyproject
 
 from __future__ import annotations
 
+import base64
 import difflib
 import os
 import shutil
@@ -18,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from mailerlm import config, paths, store
+from mailerlm.campaigns import audience, frontmatter, render
 from mailerlm.contacts import mask_email, parsing, repository
 from mailerlm.errors import MailerlmError
 from mailerlm.inbox import gmail
@@ -45,12 +47,15 @@ def _outside_block(lines: list[str]) -> list[str]:
 def setup(
     dry_run: bool = False,
     env_file: Path | None = None,
-    workspace_pointer: str = paths.DEFAULT_WORKSPACE,
+    workspace_pointer: str | None = None,
     now: Callable[[], datetime] = datetime.now,
 ) -> Board:
     """Record the workspace pointer in `.env` (inside the managed block only), then create the
     workspace folder and the database. A second run changes nothing and says so."""
     env_file = env_file or paths.env_path()
+    workspace_pointer = (
+        workspace_pointer or os.environ.get(paths.WORKSPACE_ENV) or paths.DEFAULT_WORKSPACE
+    )
     old_lines = env_file.read_text().splitlines() if env_file.exists() else []
     existing = paths.read_env_file_lines(old_lines)
     outside = paths.read_env_file_lines(_outside_block(old_lines))
@@ -390,3 +395,135 @@ def contacts_do_not_mail(email: str, clear: bool = False, dry_run: bool = False)
         return True
 
     return _change(email, dry_run, action, "do_not_mail_cleared" if clear else "do_not_mail_set")
+
+
+# ---- campaigns ---------------------------------------------------------------------------
+
+STARTER_DIRECTORY = Path(__file__).parent / "campaigns" / "starters"
+
+
+def _campaign_file(workspace: Path, name: str) -> Path:
+    if "/" in name or name.startswith("."):
+        raise MailerlmError("a campaign name is a plain word. Run: mailerlm campaigns list")
+    return workspace / "campaigns" / f"{name}.md"
+
+
+def _load_campaign(name: str) -> tuple[Path, frontmatter.Campaign]:
+    path = _campaign_file(paths.workspace_path(), name)
+    if not path.exists():
+        raise MailerlmError(f"no campaign '{name}'. Run: mailerlm campaigns list")
+    try:
+        return path, frontmatter.parse(path.read_text())
+    except frontmatter.CampaignFileError as error:
+        raise MailerlmError(f"{path.name}: {error}") from error
+
+
+def _render(path: Path, campaign: frontmatter.Campaign, first_name: str) -> render.RenderedEmail:
+    settings = config.load(paths.config_path())
+    workspace = paths.workspace_path()
+    try:
+        return render.render(
+            campaign,
+            path.parent,
+            book_title=settings.get("book", "title") or "Your Book Title",
+            sender_name=settings.get("sender", "name") or "Your Name",
+            postal_address=settings.get("sender", "postal_address"),
+            reply_to=settings.get("sender", "reply_to"),
+            image_budget_bytes=settings.get("caps", "max_image_kilobytes_per_campaign") * 1024,
+            image_cache_directory=workspace / "image-cache",
+            first_name=first_name,
+        )
+    except render.RenderError as error:
+        raise MailerlmError(f"{path.name}: {error}") from error
+
+
+def campaigns_new(name: str, starter: str = "update", dry_run: bool = False) -> Board:
+    """Copy a starter into the workspace as a new campaign file; never overwrites."""
+    source = STARTER_DIRECTORY / f"{starter}.md"
+    if not source.exists():
+        names = ", ".join(sorted(p.stem for p in STARTER_DIRECTORY.glob("*.md")))
+        raise MailerlmError(f"no starter '{starter}'. Choose one of: {names}")
+    target = _campaign_file(paths.workspace_path(), name)
+    if target.exists():
+        raise MailerlmError(f"{target.name} already exists. Edit it, or pick another name")
+    if not dry_run:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source.read_text())
+    return {
+        "dry_run": dry_run,
+        "campaign": name,
+        "file": str(target),
+        "starter": starter,
+        "next": f"Edit {target}, then run: mailerlm campaigns check {name}",
+    }
+
+
+def campaigns_list() -> Board:
+    directory = paths.workspace_path() / "campaigns"
+    names = sorted(p.stem for p in directory.glob("*.md")) if directory.exists() else []
+    starters = sorted(p.stem for p in STARTER_DIRECTORY.glob("*.md"))
+    return {
+        "campaigns": names,
+        "starters": starters,
+        "next": "Run: mailerlm campaigns new <name> --starter update"
+        if not names
+        else "Run: mailerlm campaigns check <name>",
+    }
+
+
+def campaigns_check(name: str) -> Board:
+    """Render the campaign and count who it would reach; sends nothing."""
+    path, campaign = _load_campaign(name)
+    email = _render(path, campaign, "there")
+    connection = _open(False)
+    try:
+        missing = [
+            n
+            for n in campaign.lists
+            if not connection.execute("SELECT 1 FROM mailing_list WHERE name = ?", (n,)).fetchone()
+        ]
+        reach = audience.resolve(connection, campaign.lists, campaign.tags, campaign.kind)
+    finally:
+        connection.close()
+    problems = [f"list '{n}' does not exist. Run: mailerlm lists add {n}" for n in missing] + list(
+        email.warnings
+    )
+    return {
+        "campaign": name,
+        "kind": campaign.kind,
+        "subject": email.subject,
+        "lists": list(campaign.lists),
+        "tags": list(campaign.tags),
+        "would_reach": len(reach.emails),
+        "skipped": reach.skipped_by_reason,
+        "inline_images": len(email.images),
+        "inline_image_kilobytes": round(sum(len(i.data) for i in email.images) / 1024, 1),
+        "track_clicks": campaign.track_clicks,
+        "track_opens": campaign.track_opens,
+        "problems": problems,
+        "ok": not missing,
+        "next": f"Run: mailerlm campaigns preview {name}",
+    }
+
+
+def campaigns_preview(name: str, first_name: str = "Friend") -> Board:
+    """Write the rendered HTML and text under the workspace's previews folder to open in a browser."""
+    path, campaign = _load_campaign(name)
+    email = _render(path, campaign, first_name)
+    page = email.html
+    for image in email.images:
+        uri = f"data:{image.mime};base64,{base64.b64encode(image.data).decode()}"
+        page = page.replace(f"cid:{image.content_id}", uri)
+    directory = paths.workspace_path() / "previews"
+    directory.mkdir(parents=True, exist_ok=True)
+    html_file, text_file = directory / f"{name}.html", directory / f"{name}.txt"
+    html_file.write_text(page)
+    text_file.write_text(email.text)
+    return {
+        "campaign": name,
+        "html": str(html_file),
+        "text": str(text_file),
+        "inline_images": len(email.images),
+        "warnings": list(email.warnings),
+        "next": f"Open {html_file} in a browser",
+    }

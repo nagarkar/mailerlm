@@ -18,6 +18,8 @@ Verbs today (more arrive with the implementation issues; each prints a board, `-
 - `mailerlm contacts do-not-mail <email> [--clear]`: the global block.
 - Every mutating verb takes `--dry-run`.
 - `mailerlm contacts find [--list L] [--tag T] [--status S]`: addresses are masked; `--show-full-addresses` is for the owner's own terminal, agents never use it.
+- `mailerlm campaigns new <name> [--starter confirmation|update|early-access|launch] [--dry-run]`: copies a starter to the workspace; never overwrites.
+- `mailerlm campaigns list`, `mailerlm campaigns check <name>`, `mailerlm campaigns preview <name>`: check renders and counts who it would reach; neither sends.
 - `mailerlm help [verb]`, `mailerlm completion bash`.
 
 Rules that already hold:
