@@ -16,6 +16,12 @@ Campaigns: a Markdown file with front matter becomes an email.
 
 Never imports: delivery, inbox, linkedin (enforced by the import contract "domain below
 
+## `mailerlm.cli`
+
+`src/mailerlm/cli.py`
+
+The mailerlm command line: one verb per typed-API function (metalm cli.md).
+
 ## `mailerlm.consent`
 
 `src/mailerlm/consent/__init__.py`

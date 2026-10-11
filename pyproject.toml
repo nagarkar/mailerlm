@@ -13,6 +13,8 @@ dependencies = [
   "pillow>=11.0",
   "markdown-it-py>=3.0",
   "jsonschema>=4.0",
+  "google-auth-oauthlib>=1.2",
+  "google-api-python-client>=2.150",
 ]
 
 [project.optional-dependencies]
@@ -24,6 +26,9 @@ dev = [
   "import-linter>=2.1",
   "metalm-gendocs @ git+https://github.com/nagarkar/metalm@58a5033cda569496ae50b0c3a3f3c59ae77b7d09",
 ]
+
+[project.scripts]
+mailerlm = "mailerlm.cli:main"
 
 [tool.hatch.metadata]
 allow-direct-references = true
