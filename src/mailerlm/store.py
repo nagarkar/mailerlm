@@ -17,6 +17,7 @@ from pathlib import Path
 from mailerlm.campaigns import schema as campaigns_schema
 from mailerlm.contacts import schema as contacts_schema
 from mailerlm.delivery import schema as delivery_schema
+from mailerlm.editor import schema as editor_schema
 from mailerlm.errors import MailerlmError
 
 MIGRATIONS: list[str] = [
@@ -29,6 +30,7 @@ MIGRATIONS: list[str] = [
     contacts_schema.MIGRATION,
     campaigns_schema.MIGRATION,
     delivery_schema.MIGRATION,
+    editor_schema.MIGRATION,
 ]
 
 

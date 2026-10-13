@@ -29,6 +29,10 @@ Rules that span modules, from each package's `Decisions:`. Owner rules end with 
 - `mailerlm.delivery`: Every message carries an idempotency key from the send and the address, so a retry or a resumed send never mails a person twice; only a 429 is retried. (owner)
 - `mailerlm.delivery`: Resend is the sender, behind the `MailSender` port; SES can be added as a second adapter. Why: the simplest start, one key, an HTTPS call. (owner)
 - `mailerlm.delivery`: Tracking is a setting of the sending domain in Resend; the campaign flags are notes. (owner)
+- `mailerlm.editor`: Only the owner's Save changes the saved template; the model and the owner's typing change the draft. (owner)
+- `mailerlm.editor`: The model has no tools and can only return text; that text reaches the draft only after it is one JSON object with exactly html, text and summary, and the template guard accepts it. A rejected or failed reply changes nothing and is shown in the thread with its reason. (owner)
+- `mailerlm.editor`: The model is named in `[template_editor]` in config.toml (absent section = the editor is off), chosen by the metalm model gate (tools/template_edit_gate.py). Spend, request length and turns are capped there; the caps raise and never clamp. (owner)
+- `mailerlm.editor`: The template, the thread, pasted notes and every earlier reply are data: wrapped in tags, named as data in the prompt, never obeyed. Each call sends the system prompt, every earlier request and reply summary in order, and the template as it is now. (owner)
 - `mailerlm.inbox`: Replies arrive at a plus-address of the owner's Gmail; only mail to that address is queried, and handled message ids are remembered in the store. (owner)
 - `mailerlm.inbox`: The classifier's options are `confirm_subscription`, `unsubscribe`, `change_email_address`, `question_or_comment`, `auto_reply`, `other`; its state is the thread, the list and the sender's current status. Requests are cached by payload and never reach the network in tests. (owner)
 - `mailerlm.inbox`: mailerlm has its own OAuth client and token with `gmail.readonly`; no other repo's token is reused. (owner)
@@ -43,4 +47,4 @@ Rules that span modules, from each package's `Decisions:`. Owner rules end with 
 
 ## Agent-drafted
 
-None yet.
+- `mailerlm.editor`: One edit of a template runs at a time. The model call holds no database lock.

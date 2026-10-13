@@ -569,36 +569,115 @@ async function templatesPage() {
 }
 
 async function templatePage(name) {
-  const [{ template }, { campaigns }] = await Promise.all([api("templates_get", { name }), api("campaigns_list")]);
-  const actions = h("div", { class: "row" });
-  const newName = text(name + " copy", { style: "max-width:200px" });
-  actions.append(
-    newName, h("button", { on: { click: async () => { if (await attempt(() => api("templates_duplicate", { name, new_name: newName.value }), "Duplicated")) location.hash = `#/templates/${enc(newName.value.trim())}`; } } }, "Duplicate"),
-    template.built_in ? inlineConfirm("Reset to original", async () => { if (await attempt(() => api("templates_reset", { name }), "Reset")) refresh(); }, "Replace your edits with the original") :
-      inlineConfirm("Delete template", async () => { if (await attempt(() => api("templates_delete", { name }), "Deleted")) location.hash = "#/templates"; }, "Delete this template"));
-  const html = h("textarea", { style: "min-height:340px" }, template.html), textFrame = h("textarea", { class: "short" }, template.text);
+  const [data, { campaigns }] = await Promise.all([api("templates_get", { name }), api("campaigns_list")]);
+  const { template, editor } = data;
+  const start = data.draft || template;
+  const html = h("textarea", { style: "min-height:300px" }, start.html);
+  const textFrame = h("textarea", { class: "short" }, start.text);
+  const status = h("span", { class: "chip" });
+  const problems = h("div");
+  const undoButton = h("button", { disabled: true }, "Undo"), redoButton = h("button", { disabled: true }, "Redo");
+  const saveButton = h("button", { class: "primary", disabled: true }, "Save");
+  const discardSlot = h("span");
+
+  // Undo and redo live only in this browser tab; the server keeps the one draft.
+  const history = { stack: [{ html: html.value, text: textFrame.value }], index: 0 };
+  const sync = () => { undoButton.disabled = history.index === 0; redoButton.disabled = history.index === history.stack.length - 1; };
+  const record = () => {
+    const last = history.stack[history.index];
+    if (last.html === html.value && last.text === textFrame.value) return;
+    history.stack = [...history.stack.slice(0, history.index + 1), { html: html.value, text: textFrame.value }];
+    history.index = history.stack.length - 1;
+    sync();
+  };
+  let saving = Promise.resolve();
+  const saveDraft = () => {
+    saving = saving.then(async () => {
+      const out = await attempt(() => api("templates_draft_save", { name, html: html.value, text: textFrame.value }));
+      if (!out) return;
+      status.textContent = out.draft ? "Draft: unsaved changes" : "Saved";
+      status.className = out.draft ? "chip imported" : "chip subscribed";
+      saveButton.disabled = !out.draft || out.problems.length > 0;
+      discardSlot.replaceChildren(out.draft ? inlineConfirm("Discard draft", async () => { if (await attempt(() => api("templates_draft_discard", { name }), "Draft discarded")) refresh(); }, "Throw away the draft") : null);
+      problems.replaceChildren(out.problems.length ? h("div", { class: "notice warn" }, "This draft cannot be saved yet: " + out.problems.join("; ")) : null);
+    });
+    return saving;
+  };
+  const setFrames = (state) => { html.value = state.html; textFrame.value = state.text; saveDraft(); preview(); };
+  undoButton.addEventListener("click", () => { if (history.index > 0) { history.index -= 1; setFrames(history.stack[history.index]); sync(); } });
+  redoButton.addEventListener("click", () => { if (history.index < history.stack.length - 1) { history.index += 1; setFrames(history.stack[history.index]); sync(); } });
+  saveButton.addEventListener("click", async () => {
+    await saving;
+    if (await attempt(() => api("templates_publish", { name }), "Saved. Campaigns now use this version.")) refresh();
+  });
+
+  // Preview
   const sample = h("select", {}, h("option", { value: "" }, "Sample letter"), campaigns.map((c) => h("option", { value: c.name }, `Campaign: ${c.name}`)));
   const { frame, show } = previewFrame();
   const message = h("div");
-  const run = async () => {
+  const preview = async () => {
     try {
       const out = sample.value
         ? await api("campaigns_preview", { name: sample.value, write_files: false, draft: { frame_html: html.value, frame_text: textFrame.value } })
         : await api("templates_preview", { html: html.value, text: textFrame.value });
       show(out.html); message.replaceChildren(out.warnings && out.warnings.length ? h("div", { class: "notice warn" }, out.warnings.join(" · ")) : "");
-    }
-    catch (error) { message.replaceChildren(h("div", { class: "notice bad" }, error.message)); }
+    } catch (error) { message.replaceChildren(h("div", { class: "notice bad" }, error.message)); }
   };
-  const debounced = debounce(run, 500);
-  html.addEventListener("input", debounced); textFrame.addEventListener("input", debounced); sample.addEventListener("change", run);
-  run();
-  return h("div", {}, h("p", {}, h("a", { href: "#/templates" }, "← All templates")), h("h1", {}, template.name), h("p", { class: "sub" }, template.built_in ? "Built-in: you can edit it and reset it." : "Your template."),
-    h("section", { class: "panel" }, h("header", {}, h("h2", {}, "Frame")),
-      h("p", { class: "small" }, "Keep {{ body_html | safe }} (HTML) and {{ body_text }} (text) where the letter goes. Also available: {{ subject }}, {{ preview_text }}, {{ unsubscribe_line }}, {{ sender_name }}, {{ postal_address }}."),
-      field("HTML", html), field("Plain text", textFrame),
-      h("div", { class: "row", style: "margin-top:12px" }, h("button", { class: "primary", on: { click: async () => { if (await attempt(() => api("templates_save", { name, html: html.value, text: textFrame.value }), "Saved")) refresh(); } } }, "Save template")),
-      h("div", { style: "margin-top:12px" }, actions)),
-    h("section", { class: "panel" }, h("header", {}, h("h2", {}, "Preview"), sample), message, frame));
+  const typed = debounce(() => { record(); saveDraft(); preview(); }, 700);
+  html.addEventListener("input", typed); textFrame.addEventListener("input", typed); sample.addEventListener("change", preview);
+
+  // The conversation with the model
+  const thread = h("div", { class: "thread" });
+  const drawMessage = (m) => {
+    if (m.role === "user") return h("div", { class: "bubble you" }, m.content);
+    const bad = m.status !== "ok";
+    return h("div", { class: `bubble model${bad ? " bad" : ""}` }, bad ? (m.status === "failed" ? "" : "Could not apply that: ") : "", m.content,
+      m.cost_usd != null ? h("div", { class: "small" }, `${m.model} · $${m.cost_usd.toFixed(4)}`) : null);
+  };
+  const drawThread = (messages) => thread.replaceChildren(messages.length ? messages.map(drawMessage) : h("p", { class: "small" }, "Ask for a change in words, for example “make the background white and the footer text 13px”. Each reply goes into the draft; you decide when to Save."));
+  drawThread(data.thread);
+  const box = h("textarea", { class: "short", maxlength: String(editor.max_request_characters || 2000), placeholder: "What should change in this template?", disabled: !editor.enabled });
+  const ask = h("button", { class: "primary", disabled: !editor.enabled }, "Send");
+  const send = async () => {
+    const request = box.value.trim();
+    if (!request) return;
+    ask.disabled = true; box.disabled = true; ask.textContent = "Working…";
+    try {
+      await saving;
+      const out = await api("templates_ai_edit", { name, request });
+      box.value = "";
+      thread.append(...out.added.map(drawMessage));
+      if (out.status === "ok") { html.value = out.draft.html; textFrame.value = out.draft.text; record(); saveDraft(); preview(); }
+      thread.lastElementChild?.scrollIntoView({ block: "nearest" });
+    } catch (error) { toast(error.message, true); }
+    ask.disabled = !editor.enabled; box.disabled = !editor.enabled; ask.textContent = "Send";
+  };
+  ask.addEventListener("click", send);
+  box.addEventListener("keydown", (event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) send(); });
+  const chat = h("section", { class: "panel" }, h("header", {}, h("h2", {}, "Edit with a prompt"),
+    data.thread.length ? inlineConfirm("New conversation", async () => { if (await attempt(() => api("templates_thread_clear", { name }), "New conversation")) refresh(); }, "Clear this thread") : null),
+    editor.enabled ? h("p", { class: "small" }, `${editor.model} · $${editor.spent_today_usd.toFixed(2)} of $${editor.max_usd_per_day.toFixed(2)} spent today · this template only · Cmd/Ctrl+Enter sends`) : h("div", { class: "notice warn" }, editor.reason),
+    thread, h("div", { style: "margin-top:10px" }, box), h("div", { class: "row", style: "margin-top:8px" }, ask));
+
+  const newName = text(name + " copy", { style: "max-width:200px" });
+  const others = h("div", { class: "row" }, newName,
+    h("button", { on: { click: async () => { if (await attempt(() => api("templates_duplicate", { name, new_name: newName.value }), "Duplicated")) location.hash = `#/templates/${enc(newName.value.trim())}`; } } }, "Duplicate"),
+    template.built_in ? inlineConfirm("Reset to original", async () => { if (await attempt(() => api("templates_reset", { name }), "Reset")) refresh(); }, "Replace the saved version and any draft with the original")
+      : inlineConfirm("Delete template", async () => { if (await attempt(() => api("templates_delete", { name }), "Deleted")) location.hash = "#/templates"; }, "Delete this template"));
+
+  const page = h("div", {}, h("p", {}, h("a", { href: "#/templates" }, "← All templates")),
+    h("div", { class: "row spread" }, h("h1", {}, template.name), h("div", { class: "row" }, status, undoButton, redoButton, discardSlot, saveButton)),
+    h("p", { class: "sub" }, template.built_in ? "Built-in: edit it, or reset it to the original. Only Save changes what campaigns use." : "Only Save changes what campaigns use."),
+    problems,
+    h("div", { class: "editor-grid" },
+      h("section", { class: "panel" }, h("header", {}, h("h2", {}, "Frame")),
+        h("p", { class: "small" }, "Keep {{ body_html | safe }} (HTML) and {{ body_text }} (text) where the letter goes, and the unsubscribe line and postal address. Also available: {{ subject }}, {{ preview_text }}, {{ sender_name }}."),
+        field("HTML", html), field("Plain text", textFrame)),
+      chat),
+    h("section", { class: "panel" }, h("header", {}, h("h2", {}, "Preview (this draft)"), sample), message, frame),
+    h("section", { class: "panel" }, h("header", {}, h("h2", {}, "Other actions")), others));
+  saveDraft(); preview(); sync();
+  return page;
 }
 
 render();

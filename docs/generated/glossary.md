@@ -6,6 +6,7 @@
 - **campaign** (`mailerlm.campaigns`): one letter with its subject, body, values, lists, tags and flags, sent once.
 - **contact** (`mailerlm.contacts`): one person, identified by a normalized email address and optionally a LinkedIn profile URL.
 - **double opt-in** (`mailerlm.consent`): a contact is mailed campaigns only after replying yes to a confirmation email.
+- **draft** (`mailerlm.editor`): the one unsaved version of a template; absent when it equals the saved version.
 - **fingerprint** (`mailerlm.delivery`): a short code of the exact letter, sender and audience a plan showed.
 - **linkedin status** (`mailerlm.linkedin`): where a contact stands in the move from a LinkedIn conversation to a confirmed email subscription.
 - **list** (`mailerlm.contacts`): a named audience a campaign is sent to; a contact may be on several.
@@ -16,5 +17,6 @@
 - **starter** (`mailerlm.campaigns`): a shipped campaign text that a new campaign is created from.
 - **tag** (`mailerlm.contacts`): a free label on a contact, such as `early-access`, used to narrow a campaign's audience.
 - **template** (`mailerlm.campaigns`): the HTML and text frame a campaign body is placed in.
+- **thread** (`mailerlm.editor`): the stored conversation between the owner and the model about one template.
 - **value** (`mailerlm.campaigns`): a named piece of text a campaign substitutes into its subject and body, such as `book_title`.
 - **workspace** (`mailerlm`): the private directory holding the SQLite store (contacts, campaigns, templates, images), logs and token files.

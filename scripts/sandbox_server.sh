@@ -3,7 +3,8 @@
 # operations.md, "Sandbox script"). Declines the real port and any workspace inside the real one.
 #   scripts/sandbox_server.sh [port] [--fresh]
 # --fresh starts from an empty store instead of a copy of the real one. Credentials that act outside
-# this Mac (Resend, TypeSafe, Gmail) are removed from the environment, so nothing tapped here reaches anywhere.
+# this Mac (Resend, TypeSafe, Gmail) are removed from the environment, so nothing tapped here reaches anywhere;
+# model keys are kept so the template editor can be tried (each edit costs about a cent).
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 port="${1:-8790}"; fresh=""
@@ -19,6 +20,11 @@ if [ -z "$fresh" ] && [ -f "$real/mailerlm.sqlite" ]; then
   rm -f "$sandbox/ws/mailerlm.sqlite"
   sqlite3 "$real/mailerlm.sqlite" ".backup '$sandbox/ws/mailerlm.sqlite'"
 fi
+# Model-vendor keys stay (they only spend a little on template drafts); read from the real .env, never printed.
+for key in ANTHROPIC_API_KEY GEMINI_API_KEY; do
+  value="$(grep -E "^$key=" "$here/.env" 2>/dev/null | head -1 | cut -d= -f2-)"
+  [ -n "$value" ] && export "$key=$value"
+done
 echo "sandbox workspace: $sandbox/ws"
 echo "sandbox server: http://127.0.0.1:$port/ (Ctrl-C to stop; data is thrown away)"
 exec env -u RESEND_API_KEY -u TYPESAFE_API_KEY -u GMAIL_CLIENT_ID -u GMAIL_CLIENT_SECRET \
