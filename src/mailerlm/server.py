@@ -86,8 +86,14 @@ METHODS = (
     "sends_status",
     "sends_list",
     "sends_poll",
+    "replies_check",
+    "replies_list",
+    "replies_decide",
+    "replies_undo",
 )
-UNLOCKED = frozenset({"templates_ai_edit"})  # a slow model call must not hold the one write lock
+UNLOCKED = frozenset(
+    {"templates_ai_edit", "replies_check"}
+)  # a slow model call must not hold the one write lock
 _STATIC = {"app.css": "text/css; charset=utf-8", "app.js": "text/javascript; charset=utf-8"}
 _IMAGE_PATH = re.compile(r"^/(image|upload)/([^/]+)/([^/]+)$")
 write_lock = threading.Lock()

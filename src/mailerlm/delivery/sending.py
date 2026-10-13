@@ -57,14 +57,15 @@ def create_send(
     fingerprint: str,
     recipients: list[Recipient],
     now: Callable[[], datetime] = datetime.now,
+    excerpt: str = "",
 ) -> int:
     campaign = connection.execute(
         "SELECT id FROM campaign WHERE name = ?", (campaign_name,)
     ).fetchone()
     stamp = _stamp(now)
     cursor = connection.execute(
-        "INSERT INTO send (campaign_id, campaign_name, kind, status, subject, fingerprint, planned, created_at) "
-        "VALUES (?, ?, ?, 'sending', ?, ?, ?, ?)",
+        "INSERT INTO send (campaign_id, campaign_name, kind, status, subject, fingerprint, planned, created_at, excerpt) "
+        "VALUES (?, ?, ?, 'sending', ?, ?, ?, ?, ?)",
         (
             campaign[0] if campaign else None,
             campaign_name,
@@ -73,6 +74,7 @@ def create_send(
             fingerprint,
             len(recipients),
             stamp,
+            excerpt[:1500],
         ),
     )
     send_id = int(cursor.lastrowid or 0)

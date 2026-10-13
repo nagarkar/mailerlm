@@ -23,6 +23,7 @@ Verbs today (more arrive with the implementation issues; each prints a board, `-
 - `mailerlm sends plan <name>` and `mailerlm sends list`: read-only; show who a real send would reach and recent results.
 - `mailerlm sends test <name>`: mails the campaign once to the owner's own reply-to address (an agent may run this only when the owner asks).
 - `mailerlm sends start <name> --fingerprint F`: the real send, the owner's act. Agents never run it (the repo's permission settings deny it); `mailerlm sends resume <send>` and `mailerlm sends poll [--send N]` finish and follow a send.
+- `mailerlm replies check`, `mailerlm replies list`, `mailerlm replies decide <reply> <decision>`, `mailerlm replies undo <reply>`: read replies from people already mailed, classify them with Jev, and settle the queue. Reply text is the owner's data: never print it in chat.
 - `mailerlm serve [--port N]`: runs the web app (the launch agent runs it; the owner uses the page to edit campaigns, templates, settings and people).
 - `mailerlm help [verb]`, `mailerlm completion bash`.
 
