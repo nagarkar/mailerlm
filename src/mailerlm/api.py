@@ -576,6 +576,55 @@ def templates_save(name: str, html: str, text: str) -> Board:
     return _guard(work)
 
 
+SAMPLE_LETTER = """Hi {{ first_name }},
+
+This is a sample letter, so you can see how the template looks without a campaign.
+
+## A heading
+
+A paragraph with **bold**, *italic* and a [link](https://example.com).
+
+- First point
+- Second point
+
+| Chapter | Status |
+|---|---|
+| One | Draft |
+
+> A short quotation sits here.
+
+{{ sender_name }}
+"""
+
+
+def templates_preview(html: str, text: str) -> Board:
+    """Render a template (as typed, unsaved) around a built-in sample letter."""
+
+    def work() -> Board:
+        with _transaction() as connection:
+            defaults = campaigns_repository.settings_get(connection)
+        try:
+            email = render.render(
+                subject="A sample subject",
+                body=SAMPLE_LETTER,
+                preview_text="A sample preview line",
+                frame_html=html,
+                frame_text=text,
+                variables={},
+                sender_name=defaults["sender_name"] or "Your Name",
+                postal_address=defaults["postal_address"],
+                reply_to=defaults["reply_to"],
+                resolve_image=lambda _name: None,
+                image_budget_bytes=0,
+                first_name="Friend",
+            )
+        except render.RenderError as error:
+            raise MailerlmError(str(error)) from error
+        return {"html": email.html, "text": email.text, "warnings": list(email.warnings)}
+
+    return _guard(work)
+
+
 def templates_duplicate(name: str, new_name: str) -> Board:
     def work() -> Board:
         with _transaction() as connection:

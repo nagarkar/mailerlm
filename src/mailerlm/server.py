@@ -62,6 +62,7 @@ METHODS = (
     "templates_get",
     "templates_save",
     "templates_duplicate",
+    "templates_preview",
     "templates_reset",
     "templates_delete",
     "campaigns_list",

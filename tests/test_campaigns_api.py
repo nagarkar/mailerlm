@@ -156,3 +156,13 @@ def test_a_missing_thing_is_not_found(workspace):
         api.contacts_tag("ghost@example.com", "x")
     with pytest.raises(NotFoundError):
         api.templates_get("ghost")
+
+
+def test_a_template_previews_around_a_sample_letter_without_any_campaign(workspace):
+    template = api.templates_get("Plain letter")["template"]
+    out = api.templates_preview(template["html"], template["text"])
+    assert (
+        "sample letter" in out["html"] and "<table" in out["html"] and "Hi Friend," in out["text"]
+    )
+    with pytest.raises(MailerlmError, match="template"):
+        api.templates_preview("{{ body_html | safe }}{{ nope }}", "{{ body_text }}")

@@ -577,12 +577,16 @@ async function templatePage(name) {
     template.built_in ? inlineConfirm("Reset to original", async () => { if (await attempt(() => api("templates_reset", { name }), "Reset")) refresh(); }, "Replace your edits with the original") :
       inlineConfirm("Delete template", async () => { if (await attempt(() => api("templates_delete", { name }), "Deleted")) location.hash = "#/templates"; }, "Delete this template"));
   const html = h("textarea", { style: "min-height:340px" }, template.html), textFrame = h("textarea", { class: "short" }, template.text);
-  const sample = h("select", {}, campaigns.map((c) => h("option", { value: c.name }, c.name)));
+  const sample = h("select", {}, h("option", { value: "" }, "Sample letter"), campaigns.map((c) => h("option", { value: c.name }, `Campaign: ${c.name}`)));
   const { frame, show } = previewFrame();
   const message = h("div");
   const run = async () => {
-    if (!sample.value) { message.replaceChildren(h("p", { class: "small" }, "Create a campaign to preview this template with.")); return; }
-    try { const out = await api("campaigns_preview", { name: sample.value, write_files: false, draft: { frame_html: html.value, frame_text: textFrame.value } }); show(out.html); message.replaceChildren(""); }
+    try {
+      const out = sample.value
+        ? await api("campaigns_preview", { name: sample.value, write_files: false, draft: { frame_html: html.value, frame_text: textFrame.value } })
+        : await api("templates_preview", { html: html.value, text: textFrame.value });
+      show(out.html); message.replaceChildren(out.warnings && out.warnings.length ? h("div", { class: "notice warn" }, out.warnings.join(" · ")) : "");
+    }
     catch (error) { message.replaceChildren(h("div", { class: "notice bad" }, error.message)); }
   };
   const debounced = debounce(run, 500);
