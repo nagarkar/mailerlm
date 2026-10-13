@@ -74,6 +74,13 @@ METHODS = (
     "campaigns_image_remove",
     "campaigns_check",
     "campaigns_preview",
+    "sends_plan",
+    "sends_test",
+    "sends_start",
+    "sends_resume",
+    "sends_status",
+    "sends_list",
+    "sends_poll",
 )
 _STATIC = {"app.css": "text/css; charset=utf-8", "app.js": "text/javascript; charset=utf-8"}
 _IMAGE_PATH = re.compile(r"^/(image|upload)/([^/]+)/([^/]+)$")

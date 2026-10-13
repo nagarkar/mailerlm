@@ -10,10 +10,14 @@ from __future__ import annotations
 import base64
 import contextlib
 import difflib
+import hashlib
+import json
 import os
+import re
 import shutil
 import sqlite3
 import sys
+import threading
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -22,7 +26,10 @@ from typing import Any
 from mailerlm import config, paths, store
 from mailerlm.campaigns import audience, frontmatter, render
 from mailerlm.campaigns import repository as campaigns_repository
+from mailerlm.consent import states as consent_states
 from mailerlm.contacts import mask_email, parsing, repository
+from mailerlm.delivery import resend, sending
+from mailerlm.delivery.sender import InlinePicture, MailSender, OutgoingMessage, SenderError
 from mailerlm.errors import MailerlmError, NotFoundError
 from mailerlm.inbox import gmail
 
@@ -856,3 +863,306 @@ def overview() -> Board:
             defaults["sender_name"] and defaults["postal_address"] and defaults["reply_to"]
         ),
     }
+
+
+# ---- sending -----------------------------------------------------------------------------
+
+sender_for_tests: MailSender | None = None  # tests set this; a real run leaves it None
+running_sends: set[int] = set()
+
+
+def _sender() -> MailSender:
+    if sender_for_tests is not None:
+        return sender_for_tests
+    if not os.environ.get(resend.KEY_ENV):
+        raise MailerlmError(f"{resend.KEY_ENV} is not set. Add it to .env (see .env.example)")
+    return resend.ResendSender()
+
+
+def _pause(sender: MailSender) -> float:
+    return resend.SECONDS_BETWEEN_MESSAGES if sender.name == "resend" else 0.0
+
+
+def _effective_sender(connection: sqlite3.Connection, campaign: dict) -> dict[str, str]:
+    """The campaign's own sender fields, else the one list's override, else the Settings defaults."""
+    defaults = campaigns_repository.settings_get(connection)
+    list_override = {"sender_name": "", "sender_address": ""}
+    if len(campaign["lists"]) == 1:
+        row = connection.execute(
+            "SELECT sender_name, sender_address FROM mailing_list WHERE name = ?",
+            (campaign["lists"][0],),
+        ).fetchone()
+        if row:
+            list_override = {"sender_name": row[0] or "", "sender_address": row[1] or ""}
+    return {key: campaign[key] or list_override.get(key, "") or defaults[key] for key in defaults}
+
+
+def _message(
+    connection: sqlite3.Connection, name: str, recipient: sending.Recipient, key: str
+) -> OutgoingMessage:
+    campaign, email = _render(connection, name, recipient.first_name)
+    who = _effective_sender(connection, campaign)
+    return OutgoingMessage(
+        sender_name=who["sender_name"],
+        sender_address=who["sender_address"],
+        to=recipient.email,
+        subject=email.subject,
+        html=email.html,
+        text=email.text,
+        reply_to=who["reply_to"],
+        unsubscribe_mailto=email.unsubscribe_mailto,
+        pictures=tuple(
+            InlinePicture(i.content_id, i.filename, i.mime, i.data) for i in email.images
+        ),
+        idempotency_key=key,
+        tag=re.sub(r"[^A-Za-z0-9_-]", "-", name)[:60],
+    )
+
+
+def _prepare(connection: sqlite3.Connection, name: str) -> dict:
+    campaign, email = _render(connection, name, "Friend")
+    who = _effective_sender(connection, campaign)
+    reach = audience.resolve(
+        connection, tuple(campaign["lists"]), tuple(campaign["tags"]), campaign["kind"]
+    )
+    problems = list(email.warnings)
+    for key, label in (
+        ("sender_name", "sender name"),
+        ("sender_address", "sender address"),
+        ("reply_to", "reply-to address"),
+        ("postal_address", "postal address"),
+    ):
+        if not who[key]:
+            problems.append(f"no {label} set (Settings, or this campaign's Sender section)")
+    if not campaign["lists"]:
+        problems.append("the campaign names no list")
+    if not campaign["subject"].strip():
+        problems.append("the campaign has no subject")
+    if not campaign["body"].strip():
+        problems.append("the letter is empty")
+    if campaign["track_clicks"] or campaign["track_opens"]:
+        problems.append(
+            "tracking is set per sending domain in Resend, not per campaign; the flags here are only notes"
+        )
+    problems = sorted(set(problems))
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            {
+                "subject": email.subject,
+                "html": email.html,
+                "text": email.text,
+                "sender": who,
+                "kind": campaign["kind"],
+                "recipients": list(reach.emails),
+                "images": [hashlib.sha256(i.data).hexdigest() for i in email.images],
+            },
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()[:16]
+    return {
+        "campaign": campaign,
+        "email": email,
+        "sender": who,
+        "reach": reach,
+        "problems": problems,
+        "fingerprint": fingerprint,
+    }
+
+
+def sends_plan(name: str) -> Board:
+    """What a real send would do right now, with the fingerprint that `sends_start` must repeat."""
+
+    def work() -> Board:
+        settings = config.load(paths.config_path())
+        with _transaction() as connection:
+            plan = _prepare(connection, name)
+            today = sending.live_sends_today(connection)
+            repeated = sending.already_sent(connection, name, plan["fingerprint"])
+        reach, who = plan["reach"], plan["sender"]
+        blockers = [p for p in plan["problems"] if not p.startswith("tracking is set")]
+        max_recipients = settings.get("caps", "max_recipients_per_send")
+        max_sends = settings.get("caps", "max_sends_per_day")
+        if not reach.emails:
+            blockers.append("nobody would receive it")
+        if len(reach.emails) > max_recipients:
+            blockers.append(
+                f"{len(reach.emails)} recipients is over the cap of {max_recipients} (caps.max_recipients_per_send)"
+            )
+        if today >= max_sends:
+            blockers.append(
+                f"{today} live sends today reached the cap of {max_sends} (caps.max_sends_per_day)"
+            )
+        if repeated:
+            blockers.append("this exact letter was already sent to this exact audience")
+        return {
+            "campaign": name,
+            "kind": plan["campaign"]["kind"],
+            "subject": plan["email"].subject,
+            "from": f"{who['sender_name']} <{who['sender_address']}>",
+            "reply_to": who["reply_to"],
+            "recipients": len(reach.emails),
+            "skipped": reach.skipped_by_reason,
+            "fingerprint": plan["fingerprint"],
+            "problems": plan["problems"],
+            "blockers": blockers,
+            "can_send": not blockers,
+            "next": f"Run: mailerlm sends start {name} --fingerprint {plan['fingerprint']}"
+            if not blockers
+            else "Fix the blockers above, then plan again",
+        }
+
+    return _guard(work)
+
+
+def _execute(send_id: int, name: str, kind: str) -> dict[str, int]:
+    sender = _sender()
+    connection = _open()
+    running_sends.add(send_id)
+    try:
+        result = sending.run_send(
+            connection,
+            send_id,
+            sender,
+            lambda recipient, key: _message(connection, name, recipient, key),
+            pause_seconds=_pause(sender),
+        )
+        if kind == "live":
+            campaign = campaigns_repository.campaign_get(connection, name)
+            if campaign["kind"] == "confirmation":
+                sent = [
+                    r[0]
+                    for r in connection.execute(
+                        "SELECT contact_id FROM delivery WHERE send_id = ? AND status = 'sent' AND contact_id IS NOT NULL",
+                        (send_id,),
+                    )
+                ]
+                list_ids = [repository.list_id(connection, n) for n in campaign["lists"]]
+                consent_states.mark_pending(connection, sent, list_ids)
+        return result
+    finally:
+        running_sends.discard(send_id)
+        connection.close()
+
+
+def sends_test(name: str) -> Board:
+    """Send this campaign once, to the reply-to address (your own inbox); nobody else is mailed."""
+
+    def work() -> Board:
+        sender = _sender()
+        with _transaction() as connection:
+            plan = _prepare(connection, name)
+            blockers = [
+                p
+                for p in plan["problems"]
+                if not p.startswith("tracking is set") and "names no list" not in p
+            ]
+            if blockers:
+                raise MailerlmError("cannot send yet: " + "; ".join(blockers))
+            target = plan["sender"]["reply_to"]
+            send_id = sending.create_send(
+                connection,
+                name,
+                "test",
+                plan["email"].subject,
+                plan["fingerprint"],
+                [sending.Recipient(None, target, "there")],
+            )
+        result = _execute(send_id, name, "test")
+        return {
+            "send": send_id,
+            "sent_to": "your reply-to address",
+            "counts": result,
+            "sender": sender.name,
+            "next": "Check your inbox, then run: mailerlm sends poll",
+        }
+
+    return _guard(work)
+
+
+def sends_start(name: str, fingerprint: str, background: bool = False) -> Board:
+    """The real send. It repeats the plan and refuses unless the fingerprint still matches."""
+    plan_board = sends_plan(name)
+    if plan_board["fingerprint"] != fingerprint:
+        raise MailerlmError("the letter or the audience changed since you reviewed it. Plan again")
+    if not plan_board["can_send"]:
+        raise MailerlmError("cannot send: " + "; ".join(plan_board["blockers"]))
+
+    def work() -> Board:
+        _sender()  # fail before anything is recorded when the key is missing
+        with _transaction() as connection:
+            plan = _prepare(connection, name)
+            recipients = [
+                sending.Recipient(i, e, "there")
+                for i, e in zip(plan["reach"].contact_ids, plan["reach"].emails, strict=True)
+            ]
+            send_id = sending.create_send(
+                connection, name, "live", plan["email"].subject, plan["fingerprint"], recipients
+            )
+            kind = "live"
+        if background:
+            threading.Thread(target=_execute, args=(send_id, name, kind), daemon=True).start()
+            return {
+                "send": send_id,
+                "started": True,
+                "recipients": len(recipients),
+                "next": "Watch the progress on the campaign page",
+            }
+        result = _execute(send_id, name, kind)
+        return {"send": send_id, "counts": result, "next": "Run: mailerlm sends poll"}
+
+    return _guard(work)
+
+
+def sends_resume(send_id: int, background: bool = False) -> Board:
+    """Send the rows of an interrupted send that are still queued; people already mailed are not mailed again."""
+
+    def work() -> Board:
+        with _transaction() as connection:
+            info = sending.get_send(connection, send_id)
+        if send_id in running_sends:
+            raise MailerlmError("that send is still running")
+        if info["status"] == "done":
+            return {"send": send_id, "counts": info["counts"], "next": "Nothing left to send"}
+        if background:
+            threading.Thread(
+                target=_execute, args=(send_id, info["campaign_name"], info["kind"]), daemon=True
+            ).start()
+            return {"send": send_id, "started": True}
+        return {"send": send_id, "counts": _execute(send_id, info["campaign_name"], info["kind"])}
+
+    return _guard(work)
+
+
+def sends_status(send_id: int) -> Board:
+    with _transaction() as connection:
+        info = sending.get_send(connection, send_id)
+    return {"send": {**info, "running": send_id in running_sends}}
+
+
+def sends_list(campaign: str | None = None) -> Board:
+    with _transaction() as connection:
+        found = sending.list_sends(connection, campaign)
+    return {
+        "sends": [{**item, "running": item["id"] in running_sends} for item in found],
+        "next": "Run: mailerlm sends poll",
+    }
+
+
+def sends_poll(send: int | None = None) -> Board:
+    """Ask Resend how each sent message ended up; a bounce or complaint blocks that person."""
+
+    def work() -> Board:
+        sender = _sender()
+        try:
+            with _transaction() as connection:
+                changed = sending.poll(connection, sender, send)
+        except SenderError as error:
+            hint = (
+                " Resend only lets a full-access key read delivery status; this key is send-only."
+                if "401" in str(error) or "403" in str(error)
+                else ""
+            )
+            raise MailerlmError(f"{error}.{hint}") from error
+        return {**changed, "next": "Run: mailerlm sends list"}
+
+    return _guard(work)

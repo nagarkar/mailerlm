@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(*mailerlm sends start*)",
+      "Bash(*mailerlm sends resume*)",
+      "Bash(curl*8782*)",
+      "Bash(curl*13443*)",
+      "Bash(curl*sends_start*)"
+    ]
+  }
+}

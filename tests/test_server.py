@@ -180,3 +180,12 @@ def test_the_page_script_parses():
 def test_the_server_binds_loopback_only():
     with pytest.raises(ValueError, match="loopback"):
         server.make_server("0.0.0.0", 0, "now")
+
+
+def test_every_method_the_page_calls_is_reachable():
+    import re
+
+    script = (ROOT / "src/mailerlm/web/app.js").read_text()
+    called = set(re.findall(r'api\("([a-z_]+)"', script))
+    assert called, "the page calls no methods?"
+    assert called <= set(server.METHODS) | {"overview"}, sorted(called - set(server.METHODS))

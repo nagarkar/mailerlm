@@ -235,6 +235,64 @@ def build_parser() -> clikit.Parser:
         "mailerlm campaigns preview october-update",
     )
 
+    sends = sub.add_parser("sends", help="send campaigns and follow what happened to them")
+    send_verbs = sends.add_subparsers(dest="subcommand", required=True)
+    plan = send_verbs.add_parser(
+        "plan", help="show what a real send would do, with its fingerprint"
+    )
+    plan.add_argument("name")
+    plan.set_defaults(api="sends_plan")
+    clikit.describe(
+        plan,
+        "Show who a real send would reach, from where, and the fingerprint 'sends start' needs. Sends nothing.",
+        "mailerlm sends plan october-update",
+    )
+    test = send_verbs.add_parser(
+        "test", help="send the campaign once, to your own reply-to address"
+    )
+    test.add_argument("name")
+    test.set_defaults(api="sends_test")
+    clikit.describe(
+        test,
+        "Mail the campaign once to your reply-to address. This uses Resend (a send, free on your plan).",
+        "mailerlm sends test october-update",
+    )
+    start = send_verbs.add_parser(
+        "start", help="send the campaign to its audience (the owner's act)"
+    )
+    start.add_argument("name")
+    start.add_argument("--fingerprint", required=True, help="the fingerprint shown by 'sends plan'")
+    start.set_defaults(api="sends_start")
+    clikit.describe(
+        start,
+        "Mail the campaign to everyone the plan listed. It repeats the plan and stops if anything changed since you looked. Only the owner runs this.",
+        "mailerlm sends start october-update --fingerprint 1a2b3c4d5e6f7a8b",
+    )
+    resume = send_verbs.add_parser("resume", help="finish an interrupted send")
+    resume.add_argument("send", type=int)
+    resume.set_defaults(api="sends_resume")
+    clikit.describe(
+        resume,
+        "Mail the people an interrupted send had not reached yet; nobody is mailed twice.",
+        "mailerlm sends resume 3",
+    )
+    listing = send_verbs.add_parser("list", help="recent sends and how they ended")
+    listing.add_argument("--campaign")
+    listing.set_defaults(api="sends_list")
+    clikit.describe(
+        listing,
+        "List recent sends with counts by status.",
+        "mailerlm sends list --campaign october-update",
+    )
+    poll = send_verbs.add_parser("poll", help="ask Resend how sent messages ended up")
+    poll.add_argument("--send", type=int)
+    poll.set_defaults(api="sends_poll")
+    clikit.describe(
+        poll,
+        "Update delivered, bounced and complained statuses; a bounce or complaint blocks that person. Needs a Resend key that can read status.",
+        "mailerlm sends poll",
+    )
+
     help_verb = sub.add_parser("help", help="list verbs, or show one verb's options")
     help_verb.add_argument("topic", nargs="*", help="a verb, optionally with its subverb")
     help_verb.set_defaults(api="help")
@@ -288,7 +346,13 @@ def format_board(board: dict, as_json: bool) -> str:
                 )
         elif key in ("html", "text") and not str(value).startswith("/"):
             lines.append(f"{key}: ({len(str(value))} characters; use --json to read it)")
-        elif key == "problems":
+        elif key == "sends":
+            lines.append("sends:")
+            for item in value:
+                lines.append(
+                    f"  #{item['id']} {item['campaign_name']} ({item['kind']}, {item['status']}) {item['counts']}"
+                )
+        elif key in ("problems", "blockers"):
             lines.append("problems:" if value else "problems: none")
             lines += [f"  {item}" for item in value]
         elif key == "env_diff":

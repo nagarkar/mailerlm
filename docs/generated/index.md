@@ -58,7 +58,7 @@ Never imports: consent, campaigns, delivery, inbox, linkedin (enforced by the im
 
 `src/mailerlm/delivery/__init__.py`
 
-Delivery: sending mail and reading back what happened to it.
+Delivery: sending mail, recording what happened to it, and reading the result back.
 
 Never imports: inbox, linkedin (enforced by the import contract "channels apart" in
 

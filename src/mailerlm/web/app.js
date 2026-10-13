@@ -3,6 +3,12 @@
 
 const app = document.getElementById("app");
 
+// replaceChildren would print the word "null" for a skipped child; skip null, undefined and false instead.
+const nativeReplaceChildren = Element.prototype.replaceChildren;
+Element.prototype.replaceChildren = function (...kids) {
+  nativeReplaceChildren.apply(this, kids.flat().filter((kid) => kid != null && kid !== false));
+};
+
 function h(tag, props, ...kids) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(props || {})) {
@@ -337,7 +343,7 @@ async function campaignPage(name) {
         if (await attempt(() => api("campaigns_delete", { name }), "Campaign deleted")) location.hash = "#/campaigns";
       }, "Delete this campaign and its images"))),
     h("p", { class: "sub" }, `${campaign.kind === "confirmation" ? "Confirmation letter" : "Campaign"} · edited ${when(campaign.updated_at)}`));
-  root.append(checkPanel(name), detailsSection(campaign, listNames, templates), valuesSection(campaign), senderSection(campaign, settings),
+  root.append(checkPanel(name), sendPanel(campaign), detailsSection(campaign, listNames, templates), valuesSection(campaign), senderSection(campaign, settings),
     bodySection(campaign), imagesSection(campaign), previewSection(campaign));
   return root;
 }
@@ -361,7 +367,7 @@ function checkPanel(name) {
       h("div", { class: "big", style: "font-size:22px;font-weight:650" }, `Would reach ${plural(board.would_reach, "person", "people")} right now`),
       Object.keys(board.skipped).length ? h("p", { class: "small" }, "Not reached: " + Object.entries(board.skipped).map(([why, n]) => `${n} (${why})`).join(", ")) : null,
       h("p", { class: "small" }, `${plural(board.inline_images, "image")} · ${board.inline_image_kilobytes} KB · clicks ${board.track_clicks ? "tracked" : "not tracked"} · opens ${board.track_opens ? "tracked" : "not tracked"}`),
-      board.problems.length ? h("div", { class: "notice warn" }, board.problems.map((p) => h("div", {}, "• " + p))) : h("div", { class: "notice good" }, "No problems found. Sending is not built yet; this only checks."));
+      board.problems.length ? h("div", { class: "notice warn" }, board.problems.map((p) => h("div", {}, "• " + p))) : h("div", { class: "notice good" }, "No problems found."));
   };
   run();
   window.checkAgain = run;
@@ -507,6 +513,50 @@ function previewSection(campaign) {
   run();
   return h("section", { class: "panel" }, h("header", {}, h("h2", {}, "Preview"), h("div", { class: "row" }, first, h("button", { on: { click: run } }, "Refresh"))),
     message, frame, h("details", { style: "margin-top:10px" }, h("summary", {}, "Plain-text version"), plain));
+}
+
+function sendPanel(campaign) {
+  const name = campaign.name;
+  const review = h("div");
+  const history = h("div");
+  let timer = null;
+  const drawHistory = async () => {
+    const out = await attempt(() => api("sends_list", { campaign: name }));
+    if (!out) return;
+    const busy = out.sends.some((item) => item.status === "sending" && item.running);
+    history.replaceChildren(out.sends.length ? out.sends.map((item) => h("div", { class: "person row spread" },
+      h("div", {}, h("strong", {}, `${item.kind === "test" ? "Test" : "Send"} #${item.id}`), ` · ${when(item.created_at)} · ${item.status}${item.running ? " (running…)" : ""}`,
+        h("div", { class: "small" }, Object.entries(item.counts).map(([k, v]) => `${v} ${k}`).join(", ") || "no messages yet")),
+      item.status === "sending" && !item.running ? h("button", { on: { click: async () => { if (await attempt(() => api("sends_resume", { send: item.id, background: true }), "Resuming")) drawHistory(); } } }, "Resume") : null)) : h("p", { class: "small" }, "Nothing sent yet."));
+    clearTimeout(timer);
+    if (busy) timer = setTimeout(drawHistory, 2000);
+  };
+  const plan = async () => {
+    const out = await attempt(() => api("sends_plan", { name }));
+    if (!out) return;
+    const go = h("span");
+    const arm = h("button", { class: "primary", disabled: !out.can_send, on: { click: () => go.replaceChildren(
+      h("span", {}, `Send to ${plural(out.recipients, "person", "people")} now? `),
+      h("button", { class: "primary", on: { click: async () => {
+        const started = await attempt(() => api("sends_start", { name, fingerprint: out.fingerprint, background: true }), "Sending started");
+        if (started) { review.replaceChildren(h("div", { class: "notice good" }, "Sending. Progress is below.")); drawHistory(); }
+      } } }, "Yes, send"), h("button", { on: { click: () => go.replaceChildren(arm) } }, "Cancel")) } }, `Send to ${plural(out.recipients, "person", "people")}`);
+    go.append(arm);
+    review.replaceChildren(
+      h("div", { class: "notice" }, h("div", {}, h("strong", {}, "From: "), out.from, " · replies to ", out.reply_to), h("div", {}, h("strong", {}, "Subject: "), out.subject),
+        h("div", {}, h("strong", {}, "Reaches: "), plural(out.recipients, "person", "people"), Object.keys(out.skipped).length ? " (not reached: " + Object.entries(out.skipped).map(([why, n]) => `${n} ${why}`).join(", ") + ")" : ""),
+        h("div", { class: "small" }, `Review code ${out.fingerprint}: the send stops if the letter or audience changes after this.`)),
+      ...(out.blockers.length ? [h("div", { class: "notice bad" }, out.blockers.map((b) => h("div", {}, "• " + b)))] : []),
+      ...(out.problems.length ? [h("div", { class: "notice warn" }, out.problems.map((b) => h("div", {}, "• " + b)))] : []), go);
+  };
+  drawHistory();
+  return h("section", { class: "panel" }, h("header", {}, h("h2", {}, "Send"),
+    h("div", { class: "row" },
+      h("button", { on: { click: async () => { if (await attempt(() => api("sends_test", { name }), "Test sent to your reply-to address")) drawHistory(); } } }, "Send test to me"),
+      h("button", { on: { click: plan } }, "Review the real send"))),
+    h("p", { class: "small" }, "A test goes only to your own reply-to address. The real send shows exactly who it reaches and waits for your confirmation."),
+    review, h("h2", { style: "margin-top:16px;font-size:16px" }, "History"),
+    h("div", { class: "row", style: "margin:6px 0" }, h("button", { class: "quiet", on: { click: async () => { if (await attempt(() => api("sends_poll", {}), "Delivery status updated")) drawHistory(); } } }, "Refresh delivery status")), history);
 }
 
 // ---- templates ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from mailerlm.campaigns import schema as campaigns_schema
 from mailerlm.contacts import schema as contacts_schema
+from mailerlm.delivery import schema as delivery_schema
 from mailerlm.errors import MailerlmError
 
 MIGRATIONS: list[str] = [
@@ -27,6 +28,7 @@ MIGRATIONS: list[str] = [
     """,
     contacts_schema.MIGRATION,
     campaigns_schema.MIGRATION,
+    delivery_schema.MIGRATION,
 ]
 
 
@@ -53,6 +55,7 @@ def _migrate(connection: sqlite3.Connection, migrations: list[str]) -> None:
 def _connect(path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(str(path), isolation_level=None)
     connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA busy_timeout = 5000")
     return connection
 
 
