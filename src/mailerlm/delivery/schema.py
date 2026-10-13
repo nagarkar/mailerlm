@@ -35,3 +35,6 @@ CREATE TABLE delivery (
     UNIQUE (send_id, email)
 ) STRICT
 """
+
+# What the letter said, kept so a reply can be read in its thread (the first recipient's plain text, trimmed).
+EXCERPT_MIGRATION = "ALTER TABLE send ADD COLUMN excerpt TEXT NOT NULL DEFAULT ''"

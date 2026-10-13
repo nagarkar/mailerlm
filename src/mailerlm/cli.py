@@ -293,6 +293,46 @@ def build_parser() -> clikit.Parser:
         "mailerlm sends poll",
     )
 
+    replies = sub.add_parser("replies", help="read replies to your list mail")
+    reply_verbs = replies.add_subparsers(dest="subcommand", required=True)
+    reply_check = reply_verbs.add_parser("check", help="read new replies and apply the safe ones")
+    reply_check.set_defaults(api="replies_check")
+    clikit.describe(
+        reply_check,
+        "Read replies from people you have mailed, classify each with Jev (a TypeSafe call), unsubscribe or confirm only when it is sure, and queue the rest for you.",
+        "mailerlm replies check",
+    )
+    reply_list = reply_verbs.add_parser("list", help="replies and what was decided")
+    reply_list.add_argument(
+        "--queue-only",
+        action="store_true",
+        dest="queue_only",
+        help="only the replies waiting for you",
+    )
+    reply_list.set_defaults(api="replies_list")
+    clikit.describe(
+        reply_list,
+        "List replies with Jev's pick and the decision.",
+        "mailerlm replies list --queue-only",
+    )
+    reply_decide = reply_verbs.add_parser("decide", help="settle a reply yourself")
+    reply_decide.add_argument("reply", type=int)
+    reply_decide.add_argument("decision", choices=["confirmed", "unsubscribed", "ignored"])
+    reply_decide.set_defaults(api="replies_decide")
+    clikit.describe(
+        reply_decide,
+        "Confirm or unsubscribe the person, or ignore the reply.",
+        "mailerlm replies decide 4 confirmed",
+    )
+    reply_undo = reply_verbs.add_parser("undo", help="undo an automatic decision")
+    reply_undo.add_argument("reply", type=int)
+    reply_undo.set_defaults(api="replies_undo")
+    clikit.describe(
+        reply_undo,
+        "Put the person's memberships back as they were and return the reply to the queue.",
+        "mailerlm replies undo 4",
+    )
+
     help_verb = sub.add_parser("help", help="list verbs, or show one verb's options")
     help_verb.add_argument("topic", nargs="*", help="a verb, optionally with its subverb")
     help_verb.set_defaults(api="help")
@@ -346,6 +386,12 @@ def format_board(board: dict, as_json: bool) -> str:
                 )
         elif key in ("html", "text") and not str(value).startswith("/"):
             lines.append(f"{key}: ({len(str(value))} characters; use --json to read it)")
+        elif key == "replies":
+            lines.append("replies:")
+            for item in value:
+                lines.append(
+                    f"  #{item['id']} {item['decision']} ({item['decided_by']}) {item['choice'] or '-'} {item['subject'][:50]}"
+                )
         elif key == "sends":
             lines.append("sends:")
             for item in value:

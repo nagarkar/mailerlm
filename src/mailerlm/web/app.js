@@ -102,6 +102,7 @@ const routes = [
   [/^#\/lists$/, "lists", listsPage],
   [/^#\/lists\/(.+)$/, "lists", listPage],
   [/^#\/contacts$/, "contacts", contactsPage],
+  [/^#\/replies$/, "replies", repliesPage],
   [/^#\/templates$/, "templates", templatesPage],
   [/^#\/templates\/(.+)$/, "templates", templatePage],
   [/^#\/settings$/, "settings", settingsPage],
@@ -147,6 +148,7 @@ async function home() {
         data.campaigns.length ? `Latest: ${data.campaigns[0].name}` : "Create your first from a starter"),
       card("#/lists", plural(data.lists.length, "list"), `${plural(members, "membership")} · ${subscribed} subscribed · ${waiting} waiting to confirm`),
       card("#/contacts", plural(data.contacts, "contact"), "Add, import, tag and edit people"),
+      card("#/replies", data.replies_waiting ? `${plural(data.replies_waiting, "reply", "replies")} need you` : "Replies", data.replies_waiting ? "Waiting for your decision" : "Confirmations and unsubscribes arrive here", data.replies_waiting > 0),
       card("#/templates", plural(data.templates, "template"), "The frame your letters sit in"),
       card("#/settings", data.sender_set ? "Sender and address set" : "Sender not set yet",
         data.sender_set ? "Defaults for every campaign" : "Needed before anything can be sent", !data.sender_set)));
@@ -304,6 +306,42 @@ async function contactsPage() {
     h("section", { class: "panel" }, h("div", { class: "cols" }, field("List", listSelect), field("Status", statusSelect)), field("Tag", tagInput)),
     importPanel(null),
     h("section", { class: "panel" }, results));
+}
+
+// ---- replies -----------------------------------------------------------------------------
+
+const PICKS = { confirm_subscription: "wants to subscribe", unsubscribe: "wants to stop", change_email_address: "gave another address", question_or_comment: "question or comment", auto_reply: "automatic reply", other: "unclear" };
+
+async function repliesPage() {
+  const out = await api("replies_list");
+  const waiting = out.replies.filter((r) => r.decision === "queued");
+  const handled = out.replies.filter((r) => r.decision !== "queued");
+  const result = h("div");
+  const check = h("button", { class: "primary" }, "Check for replies");
+  check.addEventListener("click", async () => {
+    check.disabled = true; check.textContent = "Reading…";
+    const board = await attempt(() => api("replies_check"));
+    check.disabled = false; check.textContent = "Check for replies";
+    if (!board) return;
+    result.replaceChildren(h("div", { class: "notice good" }, `${board.new} new: ${board.confirmed} confirmed, ${board.unsubscribed} unsubscribed, ${board.queued} waiting for you, ${board.ignored} automatic` + (board.errors ? `, ${board.errors} could not be read (try again)` : "")));
+    setTimeout(refresh, 1200);
+  });
+  const settle = (reply, decision, label) => h("button", { class: decision === "unsubscribed" ? "danger" : "", on: { click: async () => { if (await attempt(() => api("replies_decide", { reply: reply.id, decision }), "Done")) refresh(); } } }, label);
+  const card = (reply, queued) => h("div", { class: "person" },
+    h("div", { class: "row spread" }, h("div", {}, h("span", { class: "name" }, reply.name || "(no name)"), " ", h("span", { class: "small" }, `${reply.email || ""} · ${when(reply.received_at)}`)),
+      h("span", { class: `chip ${reply.decision === "confirmed" ? "subscribed" : reply.decision === "unsubscribed" ? "bad" : ""}` }, queued ? "waiting for you" : `${reply.decision} (${reply.decided_by})`)),
+    h("div", { class: "small", style: "margin-top:4px" }, reply.subject),
+    h("pre", { class: "plain" }, reply.body || "(empty)"),
+    reply.choice ? h("div", { class: "small" }, `Jev's pick: ${PICKS[reply.choice] || reply.choice} (${Math.round((reply.probability || 0) * 100)}%)`) : null,
+    queued ? h("div", { class: "row", style: "margin-top:8px" }, settle(reply, "confirmed", "Confirm them"), settle(reply, "unsubscribed", "Unsubscribe them"), settle(reply, "ignored", "Ignore")) :
+      (reply.decided_by === "jev" && reply.changes.length ? h("div", { class: "row", style: "margin-top:8px" }, inlineConfirm("Undo", async () => { if (await attempt(() => api("replies_undo", { reply: reply.id }), "Undone")) refresh(); }, "Put them back and ask me again")) : null));
+  return h("div", {}, h("h1", {}, "Replies"),
+    h("p", { class: "sub" }, "People answer your confirmation letters by replying. A clear “yes” or “stop” is applied for you; anything else waits here."),
+    h("div", { class: "row", style: "margin-bottom:12px" }, check), result,
+    h("section", { class: "panel" }, h("header", {}, h("h2", {}, `Waiting for you (${waiting.length})`)),
+      waiting.length ? waiting.map((r) => card(r, true)) : h("p", { class: "empty" }, "Nothing is waiting.")),
+    h("section", { class: "panel" }, h("header", {}, h("h2", {}, "Settled")),
+      handled.length ? handled.map((r) => card(r, false)) : h("p", { class: "empty" }, "No replies read yet.")));
 }
 
 // ---- campaigns ---------------------------------------------------------------------------

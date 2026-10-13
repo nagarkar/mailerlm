@@ -64,3 +64,99 @@ def connect(
     path.write_text(creds.to_json())
     path.chmod(0o600)
     return path
+
+
+def credentials(workspace: Path) -> Any:
+    """The stored token, refreshed when it has expired; `mailerlm gmail connect` makes it."""
+    from google.auth.transport.requests import Request
+    from google.oauth2.credentials import Credentials
+
+    path = token_path(workspace)
+    if not path.exists():
+        raise GmailNotConfigured(
+            f"Gmail is not connected (no {path.name} in the workspace). Run: mailerlm gmail connect"
+        )
+    creds = Credentials.from_authorized_user_file(str(path), SCOPES)
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+        path.write_text(creds.to_json())
+        path.chmod(0o600)
+    if not creds.valid:
+        raise GmailNotConfigured("the Gmail token is not valid. Run: mailerlm gmail connect")
+    return creds
+
+
+class GmailReader:
+    """The `MailReader` over the Gmail API, readonly. Only messages from the given senders are listed."""
+
+    def __init__(self, creds: Any):
+        from googleapiclient.discovery import build
+
+        self._service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+
+    def search(self, from_addresses: list[str], after: str) -> list[str]:
+        ids: list[str] = []
+        for start in range(0, len(from_addresses), 20):
+            chunk = from_addresses[start : start + 20]
+            query = f"from:({' OR '.join(chunk)}) after:{after}"
+            page = None
+            while True:
+                reply = (
+                    self._service.users()
+                    .messages()
+                    .list(userId="me", q=query, pageToken=page, maxResults=100)
+                    .execute()
+                )
+                ids += [m["id"] for m in reply.get("messages") or []]
+                page = reply.get("nextPageToken")
+                if not page:
+                    break
+        return list(dict.fromkeys(ids))
+
+    def fetch(self, message_id: str) -> Any:
+        import base64
+        from email.utils import parseaddr, parsedate_to_datetime
+
+        from mailerlm.inbox import text as text_tools
+        from mailerlm.inbox.reader import RawMessage
+
+        raw = (
+            self._service.users()
+            .messages()
+            .get(userId="me", id=message_id, format="full")
+            .execute()
+        )
+        headers = {
+            h["name"].lower(): h["value"] for h in (raw.get("payload") or {}).get("headers") or []
+        }
+        plain: list[str] = []
+        html: list[str] = []
+
+        def walk(part: dict) -> None:
+            data = (part.get("body") or {}).get("data")
+            if data and part.get("mimeType") == "text/plain":
+                plain.append(base64.urlsafe_b64decode(data).decode("utf-8", "replace"))
+            elif data and part.get("mimeType") == "text/html":
+                html.append(base64.urlsafe_b64decode(data).decode("utf-8", "replace"))
+            for child in part.get("parts") or []:
+                walk(child)
+
+        walk(raw.get("payload") or {})
+        try:
+            received = parsedate_to_datetime(headers["date"]).isoformat(timespec="seconds")
+        except (KeyError, TypeError, ValueError):
+            received = ""
+        body = "\n".join(plain) or text_tools.html_to_text("\n".join(html))
+        return RawMessage(
+            message_id=raw["id"],
+            thread_id=raw.get("threadId", ""),
+            from_email=parseaddr(headers.get("from", ""))[1].lower(),
+            subject=headers.get("subject", ""),
+            received_at=received,
+            body=body,
+            headers={
+                k: headers[k]
+                for k in ("auto-submitted", "precedence", "x-autoreply", "x-autorespond")
+                if k in headers
+            },
+        )

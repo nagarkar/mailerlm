@@ -19,6 +19,7 @@ from mailerlm.contacts import schema as contacts_schema
 from mailerlm.delivery import schema as delivery_schema
 from mailerlm.editor import schema as editor_schema
 from mailerlm.errors import MailerlmError
+from mailerlm.inbox import schema as inbox_schema
 
 MIGRATIONS: list[str] = [
     """
@@ -31,6 +32,8 @@ MIGRATIONS: list[str] = [
     campaigns_schema.MIGRATION,
     delivery_schema.MIGRATION,
     editor_schema.MIGRATION,
+    delivery_schema.EXCERPT_MIGRATION,
+    inbox_schema.MIGRATION,
 ]
 
 

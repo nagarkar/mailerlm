@@ -34,7 +34,9 @@ from mailerlm.delivery import resend, sending
 from mailerlm.delivery.sender import InlinePicture, MailSender, OutgoingMessage, SenderError
 from mailerlm.editor import service as editor_service
 from mailerlm.errors import MailerlmError, NotFoundError
+from mailerlm.inbox import classifier as inbox_classifier
 from mailerlm.inbox import gmail
+from mailerlm.inbox import service as inbox_service
 
 Board = dict[str, Any]
 
@@ -1003,7 +1005,11 @@ def overview() -> Board:
         campaigns = campaigns_repository.campaign_list(connection)
         templates = campaigns_repository.template_list(connection)
         defaults = campaigns_repository.settings_get(connection)
+        replies_waiting = connection.execute(
+            "SELECT COUNT(*) FROM reply WHERE decision = 'queued'"
+        ).fetchone()[0]
     return {
+        "replies_waiting": replies_waiting,
         "lists": lists,
         "contacts": contacts,
         "campaigns": campaigns,
@@ -1215,6 +1221,7 @@ def sends_test(name: str) -> Board:
                 plan["email"].subject,
                 plan["fingerprint"],
                 [sending.Recipient(None, target, "there")],
+                excerpt=plan["email"].text,
             )
         result = _execute(send_id, name, "test")
         return {
@@ -1245,7 +1252,13 @@ def sends_start(name: str, fingerprint: str, background: bool = False) -> Board:
                 for i, e in zip(plan["reach"].contact_ids, plan["reach"].emails, strict=True)
             ]
             send_id = sending.create_send(
-                connection, name, "live", plan["email"].subject, plan["fingerprint"], recipients
+                connection,
+                name,
+                "live",
+                plan["email"].subject,
+                plan["fingerprint"],
+                recipients,
+                excerpt=plan["email"].text,
             )
             kind = "live"
         if background:
@@ -1313,5 +1326,91 @@ def sends_poll(send: int | None = None) -> Board:
             )
             raise MailerlmError(f"{error}.{hint}") from error
         return {**changed, "next": "Run: mailerlm sends list"}
+
+    return _guard(work)
+
+
+# ---- replies -----------------------------------------------------------------------------
+
+reader_for_tests: Any = None  # tests set these; a real run leaves them None
+classifier_for_tests: Any = None
+
+
+def _reader() -> Any:
+    if reader_for_tests is not None:
+        return reader_for_tests
+    try:
+        return gmail.GmailReader(gmail.credentials(paths.workspace_path()))
+    except gmail.GmailNotConfigured as error:
+        raise MailerlmError(str(error)) from error
+
+
+def _classifier() -> Any:
+    if classifier_for_tests is not None:
+        return classifier_for_tests
+    if not os.environ.get(inbox_classifier.KEY_ENV):
+        raise MailerlmError(
+            f"{inbox_classifier.KEY_ENV} is not set. Add it to .env (see .env.example)"
+        )
+    return inbox_classifier.TypeSafeClassifier()
+
+
+def replies_check() -> Board:
+    """Read new replies from people you have mailed; apply the safe ones, queue the rest."""
+
+    def work() -> Board:
+        settings = config.load(paths.config_path())
+        reader, classifier = _reader(), _classifier()
+        connection = (
+            _open()
+        )  # no transaction around the mailbox and TypeSafe calls; each reply commits on its own
+        try:
+            counts = inbox_service.check(
+                connection,
+                reader,
+                classifier,
+                settings.get("classifier", "model"),
+                settings.get("classifier", "unsubscribe_min_probability"),
+                settings.get("classifier", "confirm_min_probability"),
+            )
+        finally:
+            connection.close()
+        return {
+            **counts,
+            "next": "Open the Replies page for anything queued"
+            if counts["queued"]
+            else "Nothing needs you",
+        }
+
+    return _guard(work)
+
+
+def replies_list(queue_only: bool = False) -> Board:
+    with _transaction() as connection:
+        replies = inbox_service.list_replies(connection, queue_only)
+    return {
+        "replies": replies,
+        "waiting": sum(1 for r in replies if r["decision"] == "queued"),
+        "next": "Run: mailerlm replies check",
+    }
+
+
+def replies_decide(reply: int, decision: str) -> Board:
+    """Your word on a reply: confirmed, unsubscribed or ignored (an earlier automatic pick is undone first)."""
+
+    def work() -> Board:
+        with _transaction() as connection:
+            return inbox_service.decide(connection, reply, decision)
+
+    return _guard(work)
+
+
+def replies_undo(reply: int) -> Board:
+    """Undo an automatic decision: memberships go back as they were and the reply returns to the queue."""
+
+    def work() -> Board:
+        with _transaction() as connection:
+            inbox_service.undo(connection, reply)
+        return {"undone": reply}
 
     return _guard(work)

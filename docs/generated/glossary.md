@@ -12,7 +12,7 @@
 - **list** (`mailerlm.contacts`): a named audience a campaign is sent to; a contact may be on several.
 - **membership** (`mailerlm.contacts`): a contact's place on one list, with its consent status.
 - **needs-you queue** (`mailerlm.consent`): replies the classifier did not settle, waiting for the owner.
-- **reply** (`mailerlm.inbox`): an inbound message to the list's reply address, with its thread.
+- **reply** (`mailerlm.inbox`): a message from someone mailerlm has mailed, stored with the letter it answers and what was decided.
 - **send** (`mailerlm.delivery`): one campaign delivered (or tested) to one audience, with a row per recipient.
 - **starter** (`mailerlm.campaigns`): a shipped campaign text that a new campaign is created from.
 - **tag** (`mailerlm.contacts`): a free label on a contact, such as `early-access`, used to narrow a campaign's audience.
