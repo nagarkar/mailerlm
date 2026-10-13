@@ -127,7 +127,8 @@ def test_duplicate_and_delete(workspace):
 def test_templates_are_editable_duplicable_and_the_built_in_resets(workspace):
     name = "Plain letter"
     template = api.templates_get(name)["template"]
-    api.templates_save(name, template["html"].replace("#f6f6f4", "#ffffff"), template["text"])
+    api.templates_draft_save(name, template["html"].replace("#f6f6f4", "#ffffff"), template["text"])
+    api.templates_publish(name)
     assert "#ffffff" in api.templates_get(name)["template"]["html"]
     api.templates_reset(name)
     assert "#f6f6f4" in api.templates_get(name)["template"]["html"]

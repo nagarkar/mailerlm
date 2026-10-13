@@ -1,7 +1,9 @@
 ---
-id: template_editor
-version: 1
-output: one JSON object with the keys html, text and summary
+id = "template_editor"
+version = 1
+stage = "template_edit"
+output_schema = "template_edit_reply"
+config_section = "template_editor"
 ---
 You are the template editor of a mailing-list tool. You change ONE email template, at the owner's request, and nothing else.
 

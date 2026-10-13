@@ -62,6 +62,14 @@ Delivery: sending mail, recording what happened to it, and reading the result ba
 
 Never imports: inbox, linkedin (enforced by the import contract "channels apart" in
 
+## `mailerlm.editor`
+
+`src/mailerlm/editor/__init__.py`
+
+Editor: change an email template by asking for it in words, with a draft, a saved version and a thread.
+
+Never imports: delivery, inbox, linkedin (enforced by the import contract "channels apart" and "domain below
+
 ## `mailerlm.errors`
 
 `src/mailerlm/errors.py`

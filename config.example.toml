@@ -9,3 +9,15 @@ max_image_kilobytes_per_campaign = 100   # all inline images together
 model = "jev-latest"
 unsubscribe_min_probability = 0.80
 confirm_min_probability = 0.95
+
+# The template editor (the chat beside a template in the web app). Leave this section out to turn it off.
+# Model chosen by the model gate (tools/template_edit_gate.py, 2026-10-13, six edit requests twice each):
+# every candidate was 100% valid, right and safe, so the choice was speed and cost.
+#   anthropic/claude-sonnet-5-5   6.3 s  $0.012 per edit   |  gemini/gemini-3.6-flash   8.1 s  $0.008 per edit
+#   anthropic/claude-opus-5-5     9.3 s  $0.027            |  gemini/gemini-3.1-pro-preview  44.8 s  $0.024
+# The vendor is the model name's prefix; its key is ANTHROPIC_API_KEY or GEMINI_API_KEY in .env.
+[template_editor]
+model = "gemini/gemini-3.6-flash"
+max_usd_per_day = 1.00
+max_request_characters = 2000
+max_turns = 40

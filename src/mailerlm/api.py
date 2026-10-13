@@ -23,13 +23,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from corpuslm import llm
+
 from mailerlm import config, paths, store
-from mailerlm.campaigns import audience, frontmatter, render
+from mailerlm.campaigns import audience, frontmatter, render, template_guard
 from mailerlm.campaigns import repository as campaigns_repository
 from mailerlm.consent import states as consent_states
 from mailerlm.contacts import mask_email, parsing, repository
 from mailerlm.delivery import resend, sending
 from mailerlm.delivery.sender import InlinePicture, MailSender, OutgoingMessage, SenderError
+from mailerlm.editor import service as editor_service
 from mailerlm.errors import MailerlmError, NotFoundError
 from mailerlm.inbox import gmail
 
@@ -559,19 +562,115 @@ def templates_list() -> Board:
         return {"templates": campaigns_repository.template_list(connection)}
 
 
+editor_transport_for_tests: llm.Transport | None = None  # tests set this; a real run leaves it None
+
+
+def _editor_state(connection: sqlite3.Connection) -> dict:
+    """Whether the editor can run, and why not."""
+    section = config.load(paths.config_path()).section("template_editor")
+    if section is None:
+        return {
+            "enabled": False,
+            "model": None,
+            "reason": "the editor is off: add a [template_editor] section to config.toml (see config.example.toml)",
+        }
+    key_env = llm.vendor_key_env(section["model"])
+    if editor_transport_for_tests is None and key_env and not os.environ.get(key_env):
+        return {
+            "enabled": False,
+            "model": section["model"],
+            "reason": f"{key_env} is not set in .env",
+        }
+    return {
+        "enabled": True,
+        "model": section["model"],
+        "reason": "",
+        "spent_today_usd": round(editor_service.spent_today(connection), 4),
+        "max_usd_per_day": section["max_usd_per_day"],
+        "max_request_characters": section["max_request_characters"],
+        "max_turns": section["max_turns"],
+    }
+
+
 def templates_get(name: str) -> Board:
+    """A template's saved version, its draft (if any), its thread and whether the editor can run."""
+
     def work() -> Board:
         with _transaction() as connection:
-            return {"template": campaigns_repository.template_get(connection, name)}
+            saved = campaigns_repository.template_get(connection, name)
+            html, text, is_draft = editor_service.current_state(
+                connection, editor_service._template_id(connection, name)
+            )
+            return {
+                "template": saved,
+                "draft": {"html": html, "text": text, "problems": template_guard.check(html, text)}
+                if is_draft
+                else None,
+                "thread": editor_service.thread(connection, name),
+                "editor": _editor_state(connection),
+            }
 
     return _guard(work)
 
 
-def templates_save(name: str, html: str, text: str) -> Board:
+def templates_draft_save(name: str, html: str, text: str) -> Board:
+    """Store the owner's typing as the one draft (no draft remains when it equals the saved version)."""
+
     def work() -> Board:
         with _transaction() as connection:
-            campaigns_repository.template_save(connection, name, html, text)
+            return editor_service.save_draft(connection, name, html, text)
+
+    return _guard(work)
+
+
+def templates_draft_discard(name: str) -> Board:
+    def work() -> Board:
+        with _transaction() as connection:
+            editor_service.discard_draft(connection, name)
+        return {"discarded": name}
+
+    return _guard(work)
+
+
+def templates_publish(name: str) -> Board:
+    """Save: the draft becomes the saved template. The owner's act; the model cannot reach it."""
+
+    def work() -> Board:
+        with _transaction() as connection:
+            editor_service.publish(connection, name)
         return {"saved": name}
+
+    return _guard(work)
+
+
+def templates_ai_edit(name: str, request: str) -> Board:
+    """Ask the model to change this template; the reply goes into the draft only if the guard accepts it."""
+
+    def work() -> Board:
+        section = config.load(paths.config_path()).section("template_editor")
+        with _transaction() as connection:
+            state = _editor_state(connection)
+        if section is None or not state["enabled"]:
+            raise MailerlmError(state["reason"])
+        limits = editor_service.Limits(
+            section["model"],
+            section["max_usd_per_day"],
+            section["max_request_characters"],
+            section["max_turns"],
+        )
+        transport = editor_transport_for_tests or llm.LiteLLMTransport()
+        return editor_service.edit(_open, name, request, limits, transport)
+
+    return _guard(work)
+
+
+def templates_thread_clear(name: str) -> Board:
+    """Start a new conversation about this template (the draft stays)."""
+
+    def work() -> Board:
+        with _transaction() as connection:
+            editor_service.clear_thread(connection, name)
+        return {"cleared": name}
 
     return _guard(work)
 
@@ -638,6 +737,7 @@ def templates_reset(name: str) -> Board:
     def work() -> Board:
         with _transaction() as connection:
             campaigns_repository.template_reset(connection, name)
+            editor_service.discard_draft(connection, name)
         return {"reset": name}
 
     return _guard(work)

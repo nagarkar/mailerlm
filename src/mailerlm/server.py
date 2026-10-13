@@ -60,7 +60,11 @@ METHODS = (
     "settings_save",
     "templates_list",
     "templates_get",
-    "templates_save",
+    "templates_draft_save",
+    "templates_draft_discard",
+    "templates_publish",
+    "templates_ai_edit",
+    "templates_thread_clear",
     "templates_duplicate",
     "templates_preview",
     "templates_reset",
@@ -83,6 +87,7 @@ METHODS = (
     "sends_list",
     "sends_poll",
 )
+UNLOCKED = frozenset({"templates_ai_edit"})  # a slow model call must not hold the one write lock
 _STATIC = {"app.css": "text/css; charset=utf-8", "app.js": "text/javascript; charset=utf-8"}
 _IMAGE_PATH = re.compile(r"^/(image|upload)/([^/]+)/([^/]+)$")
 write_lock = threading.Lock()
@@ -228,11 +233,17 @@ def make_server(host: str, port: int, started_at: str) -> ThreadingHTTPServer:
             except (ValueError, UnicodeDecodeError) as error:
                 self._json(400, {"error": str(error)})
                 return
-            self._answer(lambda: call(body.get("method"), body.get("params", {})))
+            self._answer(
+                lambda: call(body.get("method"), body.get("params", {})),
+                locked=body.get("method") not in UNLOCKED,
+            )
 
-        def _answer(self, work) -> None:
+        def _answer(self, work, locked: bool = True) -> None:
             try:
-                with write_lock:
+                if locked:
+                    with write_lock:
+                        result = work()
+                else:
                     result = work()
             except NotFoundError as error:
                 self._json(404, {"error": str(error)})
