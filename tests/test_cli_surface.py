@@ -70,3 +70,8 @@ def test_the_repo_skill_names_every_leaf():
 def test_the_console_script_help_runs():
     out = subprocess.run([str(ROOT / ".venv/bin/mailerlm"), "help"], capture_output=True, text=True)
     assert out.returncode == 0 and "setup" in out.stdout
+
+
+def test_a_board_whose_lists_are_names_prints_without_crashing():
+    text = cli.format_board({"lists": ["a", "b"], "campaign": "c"}, as_json=False)
+    assert "lists: ['a', 'b']" in text

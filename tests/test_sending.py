@@ -204,3 +204,15 @@ def test_resend_status_maps_the_last_event():
         post=None, get=lambda url, **k: response(200, {"last_event": "bounced"})
     )
     assert sender.status("re_3").status == "bounced"
+
+
+def test_a_refusal_carries_resends_own_reason_but_not_our_message():
+    sender = resend.ResendSender(
+        post=lambda url, **k: response(
+            403, {"name": "validation_error", "message": "The example.com domain is not verified."}
+        ),
+        get=None,
+    )
+    with pytest.raises(SenderError) as error:
+        sender.send(message())
+    assert "domain is not verified" in str(error.value) and "<p>h</p>" not in str(error.value)

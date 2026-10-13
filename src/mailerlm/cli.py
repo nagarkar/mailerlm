@@ -332,7 +332,7 @@ def format_board(board: dict, as_json: bool) -> str:
             for check in value:
                 fix = f"  fix: {check['fix']}" if check.get("fix") else ""
                 lines.append(f"  {check['state']:<7} {check['name']}: {check['detail']}{fix}")
-        elif key == "lists":
+        elif key == "lists" and value and isinstance(value[0], dict):
             lines.append("lists:")
             for item in value:
                 lines.append(f"  {item['name']}: {item['members']} members {item['by_status']}")
