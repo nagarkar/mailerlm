@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 @dataclass(frozen=True, slots=True)
 class Audience:
     emails: tuple[str, ...]
+    contact_ids: tuple[int, ...] = ()
     skipped_by_reason: dict[str, int] = field(default_factory=dict)
 
 
@@ -19,7 +20,7 @@ def resolve(
     Do-not-mail contacts, contacts without an email and people lacking a tag are skipped."""
     wanted = "imported" if kind == "confirmation" else "subscribed"
     if not lists:
-        return Audience((), {"campaign names no list": 1})
+        return Audience((), (), {"campaign names no list": 1})
     marks = ",".join("?" for _ in lists)
     rows = connection.execute(
         "SELECT DISTINCT c.id, c.email, c.do_not_mail, m.status FROM contact c "
@@ -48,4 +49,5 @@ def resolve(
             skipped[reason] = skipped.get(reason, 0) + 1
         else:
             emails[contact_id] = email
-    return Audience(tuple(sorted(emails.values())), skipped)
+    ordered = sorted(emails.items(), key=lambda item: item[1])
+    return Audience(tuple(e for _, e in ordered), tuple(i for i, _ in ordered), skipped)
