@@ -38,6 +38,17 @@ EVENT_TO_STATUS = {
 }
 
 
+def _reason(response: Any) -> str:
+    """Resend's own explanation of a refusal (its `name` and `message`), never our message."""
+    try:
+        body = response.json()
+        name, message = str(body.get("name", "")), str(body.get("message", ""))
+    except (ValueError, AttributeError):
+        return ""
+    reason = " ".join(part for part in (name, message) if part)[:160]
+    return f": {reason}" if reason else ""
+
+
 def _headers() -> dict[str, str]:
     return {
         "Authorization": f"Bearer {os.environ.get(KEY_ENV, '')}",
@@ -118,7 +129,9 @@ class ResendSender:
                 self._sleep(wait)
                 continue
             if response.status_code != 200:
-                raise SenderError(f"resend: HTTP {response.status_code} for {label}")
+                raise SenderError(
+                    f"resend: HTTP {response.status_code} for {label}{_reason(response)}"
+                )
             try:
                 return response.json()
             except ValueError as error:
