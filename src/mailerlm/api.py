@@ -1155,6 +1155,8 @@ def sends_plan(name: str) -> Board:
             "subject": plan["email"].subject,
             "from": f"{who['sender_name']} <{who['sender_address']}>",
             "reply_to": who["reply_to"],
+            "lists": plan["campaign"]["lists"],
+            "tags": plan["campaign"]["tags"],
             "recipients": len(reach.emails),
             "skipped": reach.skipped_by_reason,
             "fingerprint": plan["fingerprint"],

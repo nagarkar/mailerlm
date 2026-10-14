@@ -7,9 +7,11 @@ Never imports: delivery, linkedin (enforced by the import contract "channels apa
 pyproject.toml).
 
 Decisions:
-- Only messages from people mailerlm has actually mailed (a live send that was not refused) are searched, one
-  readonly query per 20 addresses, and each Gmail message id is read once. The rest of the mailbox is never
-  queried. (owner)
+- Only replies about a letter mailerlm really sent are read: the sender is someone it mailed in a live send and
+  the subject names one of those letters (Re:/Fwd: ignored), in the query and again on the fetched message; any
+  other mail, including the owner's own sent mail, is never listed, stored or sent to Jev. One readonly query per 20
+  addresses; each Gmail message id is read once. Enforced by:
+  tests/test_replies.py::test_other_mail_from_the_same_person_is_never_stored_or_sent_to_jev. (owner)
 - mailerlm has its own OAuth client and token with `gmail.readonly`; no other repo's token is reused. (owner)
 - Jev (TypeSafe's System One model) reads each reply and the letter it answers and picks one of: confirm_subscription,
   unsubscribe, change_email_address, question_or_comment, auto_reply, other. An unsubscribe applies at

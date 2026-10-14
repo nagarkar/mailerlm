@@ -18,8 +18,8 @@ class RawMessage:
 
 
 class MailReader(Protocol):
-    def search(self, from_addresses: list[str], after: str) -> list[str]:
-        """Message ids from these senders on or after `after` (YYYY/MM/DD)."""
+    def search(self, from_addresses: list[str], after: str, subjects: list[str]) -> list[str]:
+        """Message ids from these senders, on or after `after` (YYYY/MM/DD), whose subject names one of `subjects`."""
         ...
 
     def fetch(self, message_id: str) -> RawMessage: ...
@@ -28,10 +28,10 @@ class MailReader(Protocol):
 class FakeReader:
     def __init__(self, messages: list[RawMessage]):
         self.messages = {m.message_id: m for m in messages}
-        self.searches: list[tuple[list[str], str]] = []
+        self.searches: list[tuple[list[str], str, list[str]]] = []
 
-    def search(self, from_addresses: list[str], after: str) -> list[str]:
-        self.searches.append((from_addresses, after))
+    def search(self, from_addresses: list[str], after: str, subjects: list[str]) -> list[str]:
+        self.searches.append((from_addresses, after, subjects))
         wanted = {a.lower() for a in from_addresses}
         return [i for i, m in self.messages.items() if m.from_email.lower() in wanted]
 

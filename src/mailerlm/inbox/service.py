@@ -1,6 +1,6 @@
 """Read replies to list mail, classify each with Jev, and apply what is safe; queue the rest for the owner.
 
-Only messages from people mailerlm has actually mailed are searched. Each reply is read once (its Gmail id is
+Only replies about a letter mailerlm really sent (the sender is someone it mailed AND the subject is that letter's) are searched, fetched, stored or sent to Jev. Each reply is read once (its Gmail id is
 stored). An automatic reply is ignored by rule. Otherwise Jev picks one option from the reply and the letter it
 answers; an unsubscribe applies at `unsubscribe_min_probability`, a confirmation at `confirm_min_probability` and
 only for someone with a pending membership; everything else waits in the queue with Jev's suggestion beside it.
@@ -21,6 +21,25 @@ from mailerlm.inbox.classifier import Classifier, ClassifierError, Judgment
 from mailerlm.inbox.reader import MailReader, RawMessage
 
 AUTOMATIC_SENDER = re.compile(r"(mailer-daemon|postmaster|no-?reply|do-not-reply)@", re.I)
+_PREFIX = re.compile(r"^\s*(re|fwd?)\s*:\s*", re.I)
+
+
+def normalized_subject(subject: str) -> str:
+    """A subject without Re:/Fwd: prefixes, lower-cased, single-spaced: how a reply is matched to our letter."""
+    previous = None
+    while previous != subject:
+        previous, subject = subject, _PREFIX.sub("", subject)
+    return " ".join(subject.lower().split())
+
+
+def letter_subjects(connection: sqlite3.Connection) -> list[str]:
+    """The subjects of letters we really sent (live sends); only replies about these are read."""
+    return [
+        r[0]
+        for r in connection.execute(
+            "SELECT DISTINCT subject FROM send WHERE kind = 'live' ORDER BY subject"
+        )
+    ]
 
 
 def _stamp(now: Callable[[], datetime]) -> str:
@@ -124,19 +143,34 @@ def check(
     confirm_min: float,
     now: Callable[[], datetime] = datetime.now,
 ) -> dict[str, int]:
-    """One pass over the mailbox. Returns counts: new, confirmed, unsubscribed, queued, ignored, errors."""
-    counts = {"new": 0, "confirmed": 0, "unsubscribed": 0, "queued": 0, "ignored": 0, "errors": 0}
+    """One pass over the mailbox. Returns counts: new, confirmed, unsubscribed, queued, ignored, errors, other_mail_skipped."""
+    counts = {
+        "new": 0,
+        "confirmed": 0,
+        "unsubscribed": 0,
+        "queued": 0,
+        "ignored": 0,
+        "errors": 0,
+        "other_mail_skipped": 0,
+    }
     senders = watched_senders(connection)
     after = first_live_send_day(connection)
     if not senders or after is None:
         return counts
     known = {r[0] for r in connection.execute("SELECT gmail_id FROM reply")}
-    for message_id in reader.search(sorted(senders), after):
+    subjects = letter_subjects(connection)
+    ours = {normalized_subject(subject) for subject in subjects}
+    for message_id in reader.search(sorted(senders), after, subjects):
         if message_id in known:
             continue
         message = reader.fetch(message_id)
         contact_id = senders.get(message.from_email)
         if contact_id is None:
+            continue
+        if normalized_subject(message.subject) not in ours:
+            counts["other_mail_skipped"] += (
+                1  # not about our letter: never stored, never sent to Jev
+            )
             continue
         counts["new"] += 1
         body = text_tools.strip_quoted(message.body)

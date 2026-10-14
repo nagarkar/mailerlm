@@ -403,6 +403,7 @@ function checkPanel(name) {
     if (!board) { body.replaceChildren(h("p", { class: "small" }, "Could not check.")); return; }
     body.replaceChildren(
       h("div", { class: "big", style: "font-size:22px;font-weight:650" }, `Would reach ${plural(board.would_reach, "person", "people")} right now`),
+      h("p", { class: "small" }, `List: ${board.lists.join(", ") || "none chosen"}${board.tags.length ? ` · only people tagged ${board.tags.join(", ")}` : ""}`),
       Object.keys(board.skipped).length ? h("p", { class: "small" }, "Not reached: " + Object.entries(board.skipped).map(([why, n]) => `${n} (${why})`).join(", ")) : null,
       h("p", { class: "small" }, `${plural(board.inline_images, "image")} · ${board.inline_image_kilobytes} KB · clicks ${board.track_clicks ? "tracked" : "not tracked"} · opens ${board.track_opens ? "tracked" : "not tracked"}`),
       board.problems.length ? h("div", { class: "notice warn" }, board.problems.map((p) => h("div", {}, "• " + p))) : h("div", { class: "notice good" }, "No problems found."));
@@ -582,6 +583,7 @@ function sendPanel(campaign) {
     go.append(arm);
     review.replaceChildren(
       h("div", { class: "notice" }, h("div", {}, h("strong", {}, "From: "), out.from, " · replies to ", out.reply_to), h("div", {}, h("strong", {}, "Subject: "), out.subject),
+        h("div", {}, h("strong", {}, "List: "), out.lists.length ? out.lists.join(", ") : "none chosen", out.tags.length ? ` (only people tagged ${out.tags.join(", ")})` : ""),
         h("div", {}, h("strong", {}, "Reaches: "), plural(out.recipients, "person", "people"), Object.keys(out.skipped).length ? " (not reached: " + Object.entries(out.skipped).map(([why, n]) => `${n} ${why}`).join(", ") + ")" : ""),
         h("div", { class: "small" }, `Review code ${out.fingerprint}: the send stops if the letter or audience changes after this.`)),
       ...(out.blockers.length ? [h("div", { class: "notice bad" }, out.blockers.map((b) => h("div", {}, "• " + b)))] : []),
