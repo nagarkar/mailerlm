@@ -33,7 +33,7 @@ from mailerlm.contacts import mask_email, parsing, repository
 from mailerlm.delivery import resend, sending
 from mailerlm.delivery.sender import InlinePicture, MailSender, OutgoingMessage, SenderError
 from mailerlm.editor import service as editor_service
-from mailerlm.errors import MailerlmError, NotFoundError
+from mailerlm.errors import MailerlmError, NotConfiguredError, NotFoundError
 from mailerlm.inbox import classifier as inbox_classifier
 from mailerlm.inbox import gmail
 from mailerlm.inbox import service as inbox_service
@@ -261,6 +261,27 @@ def doctor(
             checks.append(_check("web app", "fail", "server is older than HEAD", f"Run: {restart}"))
         else:
             checks.append(_check("web app", "ok", f"running since {health['started_at']}"))
+    import subprocess as _subprocess
+
+    try:
+        loaded = (
+            "com.nagarkar.mailerlm.replies"
+            in _subprocess.run(
+                ["launchctl", "list"], capture_output=True, text=True, timeout=5
+            ).stdout
+        )
+    except (OSError, _subprocess.SubprocessError):
+        loaded = False
+    checks.append(
+        _check(
+            "scheduled reply check",
+            "ok" if loaded else "missing",
+            "the launch agent is loaded" if loaded else "no launch agent runs the reply check",
+            ""
+            if loaded
+            else "Install it: see the header of scripts/com.nagarkar.mailerlm.replies.plist",
+        )
+    )
     ok = all(c["state"] == "ok" for c in checks if c["required"])
     return {
         "ok": ok,
@@ -1344,22 +1365,54 @@ def _reader() -> Any:
     try:
         return gmail.GmailReader(gmail.credentials(paths.workspace_path()))
     except gmail.GmailNotConfigured as error:
-        raise MailerlmError(str(error)) from error
+        raise NotConfiguredError(str(error)) from error
 
 
 def _classifier() -> Any:
     if classifier_for_tests is not None:
         return classifier_for_tests
     if not os.environ.get(inbox_classifier.KEY_ENV):
-        raise MailerlmError(
+        raise NotConfiguredError(
             f"{inbox_classifier.KEY_ENV} is not set. Add it to .env (see .env.example)"
         )
     return inbox_classifier.TypeSafeClassifier()
 
 
-def replies_check() -> Board:
-    """Read new replies from people you have mailed; apply the safe ones, queue the rest."""
+def _record_run(started: datetime, ok: bool, counts: dict | None, error: str | None) -> None:
+    with _transaction() as connection:
+        connection.execute(
+            "INSERT INTO check_run (started_at, finished_at, ok, new_replies, waiting, error) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                started.isoformat(timespec="seconds"),
+                datetime.now().isoformat(timespec="seconds"),
+                int(ok),
+                (counts or {}).get("new", 0),
+                (counts or {}).get("queued", 0),
+                error,
+            ),
+        )
 
+
+def replies_check() -> Board:
+    """Read new replies from people you have mailed; apply the safe ones, queue the rest. Every run is recorded."""
+    started = datetime.now()
+    try:
+        board = _replies_check()
+    except NotConfiguredError:
+        raise  # a skip, not a run: nothing was attempted
+    except Exception as error:
+        _record_run(started, False, None, type(error).__name__)
+        raise
+    _record_run(
+        started,
+        board["errors"] == 0,
+        board,
+        None if board["errors"] == 0 else "some replies could not be read",
+    )
+    return board
+
+
+def _replies_check() -> Board:
     def work() -> Board:
         settings = config.load(paths.config_path())
         reader, classifier = _reader(), _classifier()
@@ -1390,7 +1443,15 @@ def replies_check() -> Board:
 def replies_list(queue_only: bool = False) -> Board:
     with _transaction() as connection:
         replies = inbox_service.list_replies(connection, queue_only)
+        last = connection.execute(
+            "SELECT started_at, ok, error FROM check_run ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        last_good = connection.execute(
+            "SELECT started_at FROM check_run WHERE ok = 1 ORDER BY id DESC LIMIT 1"
+        ).fetchone()
     return {
+        "last_check": {"at": last[0], "ok": bool(last[1]), "error": last[2]} if last else None,
+        "last_good_check": last_good[0] if last_good else None,
         "replies": replies,
         "waiting": sum(1 for r in replies if r["decision"] == "queued"),
         "next": "Run: mailerlm replies check",

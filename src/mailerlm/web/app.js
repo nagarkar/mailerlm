@@ -337,7 +337,8 @@ async function repliesPage() {
       (reply.decided_by === "jev" && reply.changes.length ? h("div", { class: "row", style: "margin-top:8px" }, inlineConfirm("Undo", async () => { if (await attempt(() => api("replies_undo", { reply: reply.id }), "Undone")) refresh(); }, "Put them back and ask me again")) : null));
   return h("div", {}, h("h1", {}, "Replies"),
     h("p", { class: "sub" }, "People answer your confirmation letters by replying. A clear “yes” or “stop” is applied for you; anything else waits here."),
-    h("div", { class: "row", style: "margin-bottom:12px" }, check), result,
+    h("div", { class: "row", style: "margin-bottom:12px" }, check,
+      h("span", { class: "small" }, out.last_check ? `Last check ${when(out.last_check.at)}: ${out.last_check.ok ? "ok" : "FAILED (" + out.last_check.error + ")"}${out.last_check.ok || !out.last_good_check ? "" : "; last good check " + when(out.last_good_check)}. A scheduled check runs every 10 minutes when its launch agent is installed.` : "Not checked yet.")), result,
     h("section", { class: "panel" }, h("header", {}, h("h2", {}, `Waiting for you (${waiting.length})`)),
       waiting.length ? waiting.map((r) => card(r, true)) : h("p", { class: "empty" }, "Nothing is waiting.")),
     h("section", { class: "panel" }, h("header", {}, h("h2", {}, "Settled")),

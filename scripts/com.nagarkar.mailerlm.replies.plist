@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Reads replies to your list mail every ten minutes (scripts/replies-check.sh): people you have mailed who answer
+  a letter are classified by Jev; a clear "yes" or "stop" is applied, anything else waits on the Replies page.
+  __REPO__ and __HOME__ are placeholders (this repository is public); the install command fills them.
+  The owner installs it (metalm scheduling.md, launchd job checklist):
+    sed -e "s|__REPO__|$PWD|g" -e "s|__HOME__|$HOME|g" scripts/com.nagarkar.mailerlm.replies.plist > ~/Library/LaunchAgents/com.nagarkar.mailerlm.replies.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.nagarkar.mailerlm.replies.plist
+  The interval lives only here. launchd runs a missed interval when the Mac wakes, so no daily wake is needed for a
+  ten-minute job. Stop it with: launchctl bootout gui/$(id -u)/com.nagarkar.mailerlm.replies
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.nagarkar.mailerlm.replies</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__REPO__/scripts/replies-check.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+  <key>StartInterval</key>
+  <integer>600</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>__HOME__/.mailerlm/logs/replies-agent.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.mailerlm/logs/replies-agent.log</string>
+</dict>
+</plist>

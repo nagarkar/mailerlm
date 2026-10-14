@@ -17,7 +17,7 @@ from datetime import datetime
 from corpuslm import clikit
 
 from mailerlm import api, paths, server
-from mailerlm.errors import MailerlmError
+from mailerlm.errors import MailerlmError, NotConfiguredError
 
 HELP_FOOTER = (
     "Global option: --json (the board as JSON) anywhere on the line.",
@@ -451,6 +451,9 @@ def main(argv: list[str] | None = None) -> int:
             if name in inspect.signature(function).parameters
         }
         board = function(**kwargs)
+    except NotConfiguredError as error:
+        print(f"skipped: {error}")  # a missing key or token is not a failure of a scheduled run
+        return 0
     except MailerlmError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1

@@ -10,7 +10,8 @@ Mailing-list and campaign tool for one author: contacts and lists with double op
 - Test: `.venv/bin/pytest`
 - Lint: `.venv/bin/ruff check src tests`; format `.venv/bin/ruff format src tests`; types `.venv/bin/pyright`
 - Web app: `.venv/bin/mailerlm serve` (real server on 127.0.0.1:8782 under a launch agent, `scripts/com.nagarkar.mailerlm.serve.plist`, proposed tailnet port 13443); throwaway copy: `scripts/sandbox_server.sh [port] [--fresh]`.
-- CLI: `.venv/bin/mailerlm <verb>` (`setup`, `doctor`, `gmail connect`, `lists`, `contacts`, `campaigns`, `serve`, `help`, `completion`); see `.claude/skills/mailerlm/SKILL.md`.
+- Scheduled reply check: `scripts/replies-check.sh` under the launch agent `scripts/com.nagarkar.mailerlm.replies.plist` (every 10 minutes; install commands in its header); test with `.venv/bin/pytest tests/test_replies_script.py`.
+- CLI: `.venv/bin/mailerlm <verb>` (`setup`, `doctor`, `gmail connect`, `lists`, `contacts`, `campaigns`, `sends`, `replies`, `serve`, `help`, `completion`); see `.claude/skills/mailerlm/SKILL.md`.
 
 ## Exceptions to metalm
 

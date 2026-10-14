@@ -34,6 +34,7 @@ MIGRATIONS: list[str] = [
     editor_schema.MIGRATION,
     delivery_schema.EXCERPT_MIGRATION,
     inbox_schema.MIGRATION,
+    inbox_schema.RUN_MIGRATION,
 ]
 
 
