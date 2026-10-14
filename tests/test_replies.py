@@ -13,7 +13,7 @@ from mailerlm.inbox.reader import FakeReader, RawMessage
 
 
 def reply(
-    message_id, sender, body, headers=None, subject="Re: Do you still want to hear about the book?"
+    message_id, sender, body, headers=None, subject="Re: Do you still want to hear about The Book?"
 ):
     return RawMessage(
         message_id, "t-" + message_id, sender, subject, "2026-10-13T15:00:00", body, headers or {}
@@ -276,3 +276,33 @@ def test_an_html_only_reply_is_read_as_text():
     assert text.html_to_text(
         "<p>Yes <b>please</b></p><script>x()</script><div>thanks</div>"
     ).split() == ["Yes", "please", "thanks"]
+
+
+def test_other_mail_from_the_same_person_is_never_stored_or_sent_to_jev(world):
+    reader, judge = use(
+        world,
+        [
+            reply("1", "ada@example.com", "Yes please!"),
+            reply(
+                "2",
+                "ada@example.com",
+                "Here are the payment terms, private",
+                subject="Payment plan structure",
+            ),
+            reply("3", "ada@example.com", "also private", subject="Re: Welcome Call"),
+        ],
+        {"yes please": ("confirm_subscription", 0.99)},
+    )
+    board = api.replies_check()
+    assert (board["confirmed"], board["other_mail_skipped"]) == (1, 2)
+    assert len(judge.seen) == 1 and all("private" not in str(state) for state in judge.seen)
+    assert [r["subject"] for r in api.replies_list()["replies"]] == [
+        "Re: Do you still want to hear about The Book?"
+    ]
+    assert reader.searches[0][2] == ["Do you still want to hear about The Book?"]
+
+
+def test_a_reply_with_re_and_fwd_prefixes_still_matches_our_letter():
+    from mailerlm.inbox.service import normalized_subject
+
+    assert normalized_subject("RE: Fwd:  Do you still   want?") == "do you still want?"

@@ -94,11 +94,16 @@ class GmailReader:
 
         self._service = build("gmail", "v1", credentials=creds, cache_discovery=False)
 
-    def search(self, from_addresses: list[str], after: str) -> list[str]:
+    def search(self, from_addresses: list[str], after: str, subjects: list[str]) -> list[str]:
+        """Only mail from these senders about one of our letters: the subject is part of the query, so the
+        rest of the mailbox (including the owner's own sent mail) is never listed."""
+        if not subjects:
+            return []
+        wanted = " OR ".join('"' + subject.replace('"', " ") + '"' for subject in subjects)
         ids: list[str] = []
         for start in range(0, len(from_addresses), 20):
             chunk = from_addresses[start : start + 20]
-            query = f"from:({' OR '.join(chunk)}) after:{after}"
+            query = f"from:({' OR '.join(chunk)}) subject:({wanted}) after:{after}"
             page = None
             while True:
                 reply = (
