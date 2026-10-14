@@ -306,3 +306,30 @@ def test_a_reply_with_re_and_fwd_prefixes_still_matches_our_letter():
     from mailerlm.inbox.service import normalized_subject
 
     assert normalized_subject("RE: Fwd:  Do you still   want?") == "do you still want?"
+
+
+def test_every_check_leaves_a_run_row_and_a_failure_is_recorded(world):
+    use(world, [], {})
+    assert api.replies_list()["last_check"] is None
+    api.replies_check()
+    assert api.replies_list()["last_check"]["ok"] is True
+    use(
+        world,
+        [reply("1", "ada@example.com", "yes")],
+        {"yes": ("confirm_subscription", 0.99)},
+        fail=True,
+    )
+    api.replies_check()
+    last = api.replies_list()
+    assert last["last_check"]["ok"] is False and last["last_good_check"] is not None
+
+
+def test_a_missing_key_is_a_skip_for_a_scheduled_run_not_a_failure(world, capsys):
+    from mailerlm import cli
+
+    world.monkeypatch.setattr(api, "classifier_for_tests", None)
+    world.monkeypatch.setattr(api, "reader_for_tests", FakeReader([]))
+    world.monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    assert cli.main(["replies", "check"]) == 0
+    assert capsys.readouterr().out.startswith("skipped:")
+    assert api.replies_list()["last_check"] is None, "a skip is not a run"

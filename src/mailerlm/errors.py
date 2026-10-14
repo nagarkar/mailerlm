@@ -7,3 +7,7 @@ class MailerlmError(RuntimeError):
 
 class NotFoundError(MailerlmError):
     """A named thing (campaign, list, contact, template) does not exist; the web page answers 404."""
+
+
+class NotConfiguredError(MailerlmError):
+    """A needed key, token or section is missing on this machine; a scheduled run skips instead of failing."""

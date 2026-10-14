@@ -28,3 +28,16 @@ CREATE TABLE reply (
     created_at TEXT NOT NULL
 ) STRICT
 """
+
+# One row per reply check (a scheduled run or a button press), so the page can say when it last worked.
+RUN_MIGRATION = """
+CREATE TABLE check_run (
+    id INTEGER PRIMARY KEY,
+    started_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL,
+    ok INTEGER NOT NULL CHECK (ok IN (0, 1)),
+    new_replies INTEGER NOT NULL DEFAULT 0,
+    waiting INTEGER NOT NULL DEFAULT 0,
+    error TEXT
+) STRICT
+"""
