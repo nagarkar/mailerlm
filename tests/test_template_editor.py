@@ -3,7 +3,7 @@
 import json
 
 import pytest
-from corpuslm import llm
+from llmlm import llm
 
 from mailerlm import api
 from mailerlm.errors import MailerlmError

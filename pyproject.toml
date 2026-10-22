@@ -9,6 +9,9 @@ description = "Mailing list and campaign tool for an author; code only, data sta
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  # The shared model-call layer (nagarkar/llmlm#1), installed editable from the sibling checkout
+  # before this package: `pip install -e ../llmlm -e ".[dev]"`.
+  "llmlm",
   "corpuslm @ git+https://github.com/nagarkar/corpuslm@251bf9794cf9ed34eb0a6b6dfda6b284c9a9c08c",
   "httpx>=0.28",
   "pillow>=11.0",
@@ -21,9 +24,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-llm = [
-  "litellm>=1.70",
-]
 dev = [
   "pytest>=8.0",
   "ruff>=0.12",

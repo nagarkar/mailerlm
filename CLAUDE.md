@@ -6,7 +6,7 @@ Mailing-list and campaign tool for one author: contacts and lists with double op
 
 ## Commands
 
-- Install: `python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]" && .venv/bin/pre-commit install`
+- Install: `python3.12 -m venv .venv && .venv/bin/pip install -e ../llmlm -e ".[dev]" && .venv/bin/pre-commit install`
 - Test: `.venv/bin/pytest`
 - Lint: `.venv/bin/ruff check src tests`; format `.venv/bin/ruff format src tests`; types `.venv/bin/pyright`
 - Web app: `.venv/bin/mailerlm serve` (real server on 127.0.0.1:8782 under a launch agent, `scripts/com.nagarkar.mailerlm.serve.plist`, proposed tailnet port 13443); throwaway copy: `scripts/sandbox_server.sh [port] [--fresh]`.

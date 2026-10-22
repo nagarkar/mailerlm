@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from corpuslm import llm, prompts
+from llmlm import llm, prompts
 
 from mailerlm.campaigns import repository as templates
 from mailerlm.campaigns import template_guard
