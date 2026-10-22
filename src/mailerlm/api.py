@@ -23,7 +23,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from corpuslm import llm
+from llmlm import llm
 
 from mailerlm import config, paths, store
 from mailerlm.campaigns import audience, frontmatter, render, template_guard
