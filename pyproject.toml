@@ -30,7 +30,7 @@ dev = [
   "pyright>=1.1.400",
   "pre-commit>=3.7",
   "import-linter>=2.1",
-  "metalm-gendocs @ git+https://github.com/nagarkar/metalm@58a5033cda569496ae50b0c3a3f3c59ae77b7d09",
+  "metalm-gendocs @ git+https://github.com/nagarkar/metalm@cd6d0744aaef1034fa1048e67ae37443aad77e24",
 ]
 
 [project.scripts]

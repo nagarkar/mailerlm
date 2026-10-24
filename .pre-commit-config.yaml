@@ -13,7 +13,7 @@ repos:
       - id: ruff
       - id: ruff-format
   - repo: https://github.com/nagarkar/metalm
-    rev: 58a5033cda569496ae50b0c3a3f3c59ae77b7d09   # update with: pre-commit autoupdate --bleeding-edge --repo https://github.com/nagarkar/metalm
+    rev: cd6d0744aaef1034fa1048e67ae37443aad77e24   # update with: pre-commit autoupdate --bleeding-edge --repo https://github.com/nagarkar/metalm
     hooks:
       - id: metalm-gendocs   # regenerates docs/generated/; stops the commit when it changed files
   - repo: local
