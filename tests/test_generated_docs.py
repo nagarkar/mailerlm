@@ -14,6 +14,6 @@ GENDOCS = ROOT / ".venv" / "bin" / "metalm-gendocs"
 def test_generated_docs_are_current():
     assert GENDOCS.exists(), f"{GENDOCS} missing: .venv/bin/pip install -e '.[dev]'"
     out = subprocess.run(
-        [str(GENDOCS), "--check", "--root", str(ROOT)], capture_output=True, text=True
+        [str(GENDOCS), "--dry-run", "--root", str(ROOT)], capture_output=True, text=True
     )
     assert out.returncode == 0, f"docs/generated/ is stale:\n{out.stdout}{out.stderr}"
