@@ -29,7 +29,8 @@ def test_setup_writes_the_block_creates_workspace_and_database(env_file, tmp_pat
     assert "RESEND_API_KEY=abc" in text
     assert f"{paths.BLOCK_BEGIN}\nMAILERLM_WORKSPACE={tmp_path / 'ws'}\n{paths.BLOCK_END}" in text
     assert (tmp_path / "ws" / paths.DATABASE_FILENAME).exists()
-    assert (env_file.parent / board["backup"].split("/")[-1]).exists()
+    backup = tmp_path / "state" / "mailerlm" / "env-backups" / board["backup"].split("/")[-1]
+    assert backup.exists() and not list(env_file.parent.glob(".env.bak.*"))
 
 
 def test_a_second_run_changes_nothing(env_file, tmp_path):

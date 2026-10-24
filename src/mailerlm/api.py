@@ -103,7 +103,8 @@ def setup(
         return board
     if changed:
         if env_file.exists():
-            backup = env_file.with_name(f"{env_file.name}.bak.{now():%Y%m%d-%H%M%S}")
+            backup = env_backup_path(env_file, f"{now():%Y%m%d-%H%M%S}")
+            backup.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(env_file, backup)
             board["backup"] = str(backup)
         env_file.write_text("\n".join(new_lines) + "\n")
@@ -231,7 +232,7 @@ def doctor(
             "Gmail client",
             "ok" if client else "missing",
             "GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET",
-            "" if client else "Add them to .env (see .env.example)",
+            "" if client else "Add them to .env (see env.example)",
         )
     )
     token = workspace is not None and gmail.token_path(workspace).exists()
@@ -296,7 +297,7 @@ def gmail_connect() -> Board:
     try:
         path = gmail.connect(workspace, dict(os.environ))
     except gmail.GmailNotConfigured as error:
-        raise MailerlmError(f"{error}. Add them to .env (see .env.example)") from error
+        raise MailerlmError(f"{error}. Add them to .env (see env.example)") from error
     return {"token": str(path), "scope": gmail.SCOPES[0], "next": "Run: mailerlm doctor"}
 
 
@@ -1051,7 +1052,7 @@ def _sender() -> MailSender:
     if sender_for_tests is not None:
         return sender_for_tests
     if not os.environ.get(resend.KEY_ENV):
-        raise MailerlmError(f"{resend.KEY_ENV} is not set. Add it to .env (see .env.example)")
+        raise MailerlmError(f"{resend.KEY_ENV} is not set. Add it to .env (see env.example)")
     return resend.ResendSender()
 
 
@@ -1373,7 +1374,7 @@ def _classifier() -> Any:
         return classifier_for_tests
     if not os.environ.get(inbox_classifier.KEY_ENV):
         raise NotConfiguredError(
-            f"{inbox_classifier.KEY_ENV} is not set. Add it to .env (see .env.example)"
+            f"{inbox_classifier.KEY_ENV} is not set. Add it to .env (see env.example)"
         )
     return inbox_classifier.TypeSafeClassifier()
 
@@ -1477,3 +1478,11 @@ def replies_undo(reply: int) -> Board:
         return {"undone": reply}
 
     return _guard(work)
+
+
+def env_backup_path(env_file: Path, stamp: str) -> Path:
+    """Where `setup` backs up `.env` before editing it: outside the checkout, in
+    `$XDG_STATE_HOME/mailerlm/env-backups/` (default `~/.local/state`), never beside `.env`, so
+    no backup holding keys can enter git (metalm coding.md#security-and-secrets)."""
+    state = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    return Path(state) / "mailerlm" / "env-backups" / f"{env_file.name}.bak.{stamp}"

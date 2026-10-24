@@ -13,3 +13,4 @@ def isolated_environment(monkeypatch, tmp_path):
     ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("MAILERLM_ENV", str(tmp_path / "env" / ".env"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))  # `.env` backups

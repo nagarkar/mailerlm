@@ -13,3 +13,5 @@ __pycache__/
 dist/
 config.toml
 .env.bak.*
+# No .env* path ever enters git (metalm guidelines/coding.md#security-and-secrets).
+.env*

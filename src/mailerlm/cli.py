@@ -21,7 +21,7 @@ from mailerlm.errors import MailerlmError, NotConfiguredError
 
 HELP_FOOTER = (
     "Global option: --json (the board as JSON) anywhere on the line.",
-    "Keys and the workspace pointer live in .env (see .env.example); 'mailerlm setup' writes the pointer.",
+    "Keys and the workspace pointer live in .env (see env.example); 'mailerlm setup' writes the pointer.",
     "Every verb prints a board; contacts and messages stay in the workspace, never on stdout.",
 )
 
