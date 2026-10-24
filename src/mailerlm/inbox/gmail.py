@@ -31,7 +31,7 @@ def client_config(env: Mapping[str, str] | None = None) -> dict[str, Any]:
     if not cid or not secret:
         raise GmailNotConfigured(
             "GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET are not set in .env (config names: "
-            ".env.example); create a Desktop-app OAuth client with the Gmail API enabled"
+            "env.example); create a Desktop-app OAuth client with the Gmail API enabled"
         )
     return {
         "installed": {
