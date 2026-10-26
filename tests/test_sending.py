@@ -96,10 +96,11 @@ def test_the_caps_raise_and_never_clamp(world, tmp_path):
 
 def test_an_interrupted_send_resumes_without_mailing_anyone_twice(world, monkeypatch):
     with api._transaction() as connection:
-        plan = api._prepare(connection, "c")
+        plan = api._prepare(connection, "c", api._people())
+        reach = plan["reach"]
         recipients = [
-            sending.Recipient(i, e, "x")
-            for i, e in zip(plan["reach"].contact_ids, plan["reach"].emails, strict=True)
+            sending.Recipient(i, e, "x", n)
+            for i, e, n in zip(reach.contact_ids, reach.emails, reach.lists, strict=True)
         ]
         send_id = sending.create_send(connection, "c", "live", "S", plan["fingerprint"], recipients)
         connection.execute(

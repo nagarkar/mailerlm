@@ -190,6 +190,24 @@ def build_parser() -> clikit.Parser:
         "mailerlm contacts do-not-mail ada@example.com",
     )
 
+    people = sub.add_parser("people", help="the link to peoplelm, the people service")
+    people_verbs = people.add_subparsers(dest="subcommand", required=True)
+    link = people_verbs.add_parser(
+        "link", help="record each contact's peoplelm person id (the one-time cutover)"
+    )
+    link.add_argument(
+        "mapping", help="the JSON `peoplelm import mailerlm <store> --json` printed, or -"
+    )
+    _mutating(link)
+    link.set_defaults(api="people_link")
+    clikit.describe(
+        link,
+        "Read the `people` map (mailerlm contact id -> peoplelm person id) from peoplelm's import "
+        "board and store person_id on each contact. A second run changes nothing.",
+        "peoplelm import mailerlm ~/.mailerlm/mailerlm.sqlite --json > people.json && "
+        "mailerlm people link people.json --dry-run",
+    )
+
     campaigns = sub.add_parser("campaigns", help="campaigns: new, list, check, preview")
     campaign_verbs = campaigns.add_subparsers(dest="subcommand", required=True)
     new = campaign_verbs.add_parser("new", help="create a campaign from a starter")
@@ -424,8 +442,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         print(clikit.help_text(parser, "mailerlm", None, HELP_FOOTER)[0], end="")
         return 0
-    if args.command == "gmail" and getattr(args, "api", None) is None:
-        print(clikit.help_text(parser, "mailerlm", ["gmail"], HELP_FOOTER)[0], end="")
+    if args.command in ("gmail", "people") and getattr(args, "api", None) is None:
+        print(clikit.help_text(parser, "mailerlm", [args.command], HELP_FOOTER)[0], end="")
         return 0
     try:
         if args.api == "help":

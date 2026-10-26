@@ -87,6 +87,16 @@ source_modules = ["mailerlm.contacts", "mailerlm.consent", "mailerlm.campaigns"]
 forbidden_modules = ["mailerlm.delivery", "mailerlm.inbox", "mailerlm.linkedin"]
 
 [[tool.importlinter.contracts]]
+name = "people at the bottom"
+type = "forbidden"
+source_modules = ["mailerlm.people"]
+forbidden_modules = [
+  "mailerlm.contacts", "mailerlm.consent", "mailerlm.campaigns", "mailerlm.delivery",
+  "mailerlm.inbox", "mailerlm.linkedin", "mailerlm.editor", "mailerlm.api", "mailerlm.server",
+  "mailerlm.store", "mailerlm.config", "mailerlm.paths",
+]
+
+[[tool.importlinter.contracts]]
 name = "contacts at the bottom"
 type = "forbidden"
 source_modules = ["mailerlm.contacts"]
@@ -98,7 +108,7 @@ type = "forbidden"
 source_modules = [
   "mailerlm.api", "mailerlm.server", "mailerlm.config", "mailerlm.errors", "mailerlm.paths", "mailerlm.store",
   "mailerlm.contacts", "mailerlm.consent", "mailerlm.campaigns", "mailerlm.delivery",
-  "mailerlm.inbox", "mailerlm.linkedin",
+  "mailerlm.inbox", "mailerlm.linkedin", "mailerlm.people",
 ]
 forbidden_modules = ["mailerlm.cli"]
 

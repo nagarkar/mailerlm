@@ -42,7 +42,7 @@ Config: the strict reader of `config.toml` (desired behaviour across runs, never
 
 `src/mailerlm/consent/__init__.py`
 
-Consent: the state machine that decides whether a membership may be mailed.
+Consent: the state machine that decides whether a membership may be mailed, kept in peoplelm.
 
 Never imports: delivery, inbox, linkedin (enforced by the import contract "domain below
 
@@ -97,6 +97,14 @@ Never imports: delivery, inbox (enforced by the import contract "channels apart"
 `src/mailerlm/paths.py`
 
 Paths: where mailerlm's files live (metalm coding.md, "Where .env lives").
+
+## `mailerlm.people`
+
+`src/mailerlm/people/__init__.py`
+
+People: the client of peoplelm, the people service that owns contact identity and consent.
+
+Never imports: any other mailerlm area (enforced by the import contract "people at the bottom" in
 
 ## `mailerlm.server`
 

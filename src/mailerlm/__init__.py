@@ -5,6 +5,9 @@ replies, campaigns, images, keys, the sender identity and postal address) lives 
 workspace `~/.mailerlm` (pointer `MAILERLM_WORKSPACE` in the gitignored `.env`) and is never
 committed. The store is one SQLite file in that workspace.
 
+Contact identity and consent live in peoplelm, the people service (HTTP, `PEOPLELM_URL` in `.env`);
+mailerlm keeps lists, campaigns, sends and deliveries (see `mailerlm.people`).
+
 Decisions:
 - Nothing that identifies the owner enters git: book title, sender domain and address and the
   postal address, the campaigns and the contacts live in the private database, set in the web app.

@@ -21,6 +21,11 @@ Decisions:
 - A TypeSafe failure stores nothing, so the reply is read again on the next check. Reply text and Jev's reasoning
   inputs are the owner's data and never enter the chat window. (owner)
 - An automatic decision can be undone; the memberships go back as they were and the reply returns to the queue. (owner)
+  Since the move to peoplelm this does not hold (peoplelm's task moves are one-way): undo declines
+  with the reason, awaiting the owner's ruling (see `mailerlm.consent`).
+- Every reply read from someone linked to peoplelm is logged there with `touch_log` (direction in,
+  channel email, kind reply, ref the Gmail id); confirmations and unsubscribes move their peoplelm
+  tasks. Enforced by: tests/test_replies.py::test_every_reply_read_is_logged_in_peoplelm. (owner)
 
 Terms:
 - **reply**: a message from someone mailerlm has mailed, stored with the letter it answers and what was decided.
