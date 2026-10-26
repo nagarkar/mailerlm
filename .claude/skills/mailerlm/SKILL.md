@@ -15,7 +15,8 @@ Verbs today (more arrive with the implementation issues; each prints a board, `-
 - `mailerlm contacts add --email E [--name N] [--linkedin-url U] [--list L]`: one contact.
 - `mailerlm contacts tag <email> <tag>` and `mailerlm contacts untag <email> <tag>`.
 - `mailerlm contacts join <email> <list>` and `mailerlm contacts leave <email> <list>`: a joined contact starts `imported` and is not mailed.
-- `mailerlm contacts do-not-mail <email> [--clear]`: the global block.
+- `mailerlm contacts do-not-mail <email> [--clear]`: a peoplelm block on the person's email.
+- `mailerlm people link <people.json|-> [--dry-run]`: the one-time cutover; reads the `people` map from `peoplelm import mailerlm <store> --json` and stores each contact's peoplelm person id. Owner's act.
 - Every mutating verb takes `--dry-run`.
 - `mailerlm contacts find [--list L] [--tag T] [--status S]`: addresses are masked; `--show-full-addresses` is for the owner's own terminal, agents never use it.
 - `mailerlm campaigns new <name> [--starter confirmation|update|early-access|launch] [--dry-run]`: creates a campaign in the database from a starter; never overwrites.
@@ -28,6 +29,8 @@ Verbs today (more arrive with the implementation issues; each prints a board, `-
 - `mailerlm help [verb]`, `mailerlm completion bash`.
 
 Rules that already hold:
+
+- Contacts and consent live in peoplelm (the people service, `PEOPLELM_URL` in `.env`): list memberships are its `mailing-list` tasks scoped by list name, do-not-mail is its block on email, and every letter asks its send guard first. When peoplelm does not answer, live sends and confirmation letters stop with an error naming `peoplelm doctor`; tell the owner, never work around it. Test sends still work.
 
 - Contact data (emails, replies, the footer address) lives only in the private workspace; never print it in chat, issues, PRs or commits.
 - A live send is the owner's act (Send on the review page, or `mailerlm send <campaign> --yes` in the owner's own terminal). Agents run `--dry-run` and test sends to the owner's own address only.

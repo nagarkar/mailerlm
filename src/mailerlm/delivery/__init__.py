@@ -19,7 +19,14 @@ Decisions:
 - Every message carries an idempotency key from the send and the address, so a retry or a resumed send
   never mails a person twice; only a 429 is retried. (owner)
 - Delivery status is polled from Resend's API (no webhook receiver, no public endpoint); reading status
-  needs a full-access key, and a bounce or complaint blocks that person (do-not-mail). (owner)
+  needs a full-access key, and a bounce or complaint blocks that person's email in peoplelm
+  (do-not-mail) and rejects their memberships with the reason in the note. (owner)
+- Every live letter asks peoplelm's send guard first, per recipient (channel email, purpose
+  mailing-list, scope the list); a held recipient's row is `failed` with the guard's reasons; a sent
+  one is logged with `guard_send` (ref `delivery:<id>`, summary the subject). Without peoplelm the
+  run stops and the rest stay queued for `sends resume`. Enforced by:
+  tests/test_people.py::test_the_guard_is_asked_again_at_send_time_and_a_held_row_is_reported,
+  tests/test_people.py::test_peoplelm_going_away_mid_send_stops_the_rest_queued. (owner)
 - Tracking is a setting of the sending domain in Resend; the campaign flags are notes. (owner)
 
 Terms:
