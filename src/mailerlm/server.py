@@ -1,7 +1,8 @@
 """The review server: the web app on this Mac's loopback address, fronted by `tailscale serve`.
 
 Standard library only (metalm coding.md, local review apps). `GET /` and `GET /static/<file>` serve
-the page files from `mailerlm/web`; `GET /health` reports the start time; `GET /image/<campaign>/<name>`
+the page files from `mailerlm/web`; `GET /brand/<file>` serves the app icons and wordmarks copied
+from metalm's `brand/mailerlm` into `mailerlm/web/brand` (metalm ui.md#brand); `GET /health` reports the start time; `GET /image/<campaign>/<name>`
 serves an uploaded picture; `POST /api/mailerlm` takes `{method, params}` and calls the typed API
 function of that name; `PUT /upload/<campaign>/<name>` stores one picture.
 
@@ -95,6 +96,16 @@ UNLOCKED = frozenset(
     {"templates_ai_edit", "replies_check"}
 )  # a slow model call must not hold the one write lock
 _STATIC = {"app.css": "text/css; charset=utf-8", "app.js": "text/javascript; charset=utf-8"}
+_BRAND = {
+    "favicon.ico": "image/x-icon",
+    "favicon-32.png": "image/png",
+    "apple-touch-icon.png": "image/png",
+    "icon-192.png": "image/png",
+    "icon-512.png": "image/png",
+    "logo.png": "image/png",
+    "logo-wordmark-light.png": "image/png",
+    "logo-wordmark-dark.png": "image/png",
+}
 _IMAGE_PATH = re.compile(r"^/(image|upload)/([^/]+)/([^/]+)$")
 write_lock = threading.Lock()
 
@@ -194,6 +205,12 @@ def make_server(host: str, port: int, started_at: str) -> ThreadingHTTPServer:
                 )
             elif path.startswith("/static/") and path[8:] in _STATIC:
                 self._send(200, (WEB_DIRECTORY / path[8:]).read_bytes(), _STATIC[path[8:]])
+            elif path.startswith("/brand/") and path[7:] in _BRAND:
+                self._send(200, (WEB_DIRECTORY / "brand" / path[7:]).read_bytes(), _BRAND[path[7:]])
+            elif path == "/favicon.ico":
+                self._send(
+                    200, (WEB_DIRECTORY / "brand" / "favicon.ico").read_bytes(), "image/x-icon"
+                )
             elif (match := _IMAGE_PATH.match(path)) and match[1] == "image":
                 found = api.campaigns_image_data(unquote(match[2]), unquote(match[3]))
                 if found is None:
