@@ -37,6 +37,9 @@ from mailerlm.errors import MailerlmError, NotConfiguredError, NotFoundError
 from mailerlm.inbox import classifier as inbox_classifier
 from mailerlm.inbox import gmail
 from mailerlm.inbox import service as inbox_service
+from mailerlm.people import DOCTOR as PEOPLE_DOCTOR
+from mailerlm.people import URL_ENV as PEOPLE_URL_ENV
+from mailerlm.people.client import HttpTransport, People, PeopleUnavailable, Transport
 
 Board = dict[str, Any]
 
@@ -226,6 +229,11 @@ def doctor(
                 "" if present else f"Add {key} to .env",
             )
         )
+    try:
+        _people().transport.call("purpose_list", {})
+        checks.append(_check("peoplelm", "ok", "the people service answers"))
+    except MailerlmError as error:
+        checks.append(_check("peoplelm", "fail", str(error), PEOPLE_DOCTOR))
     client = bool(os.environ.get("GMAIL_CLIENT_ID") and os.environ.get("GMAIL_CLIENT_SECRET"))
     checks.append(
         _check(
@@ -332,6 +340,21 @@ def _transaction(dry_run: bool = False):
     connection.close()
 
 
+people_for_tests: Transport | None = None  # tests set this; a real run leaves it None
+
+
+def _people() -> People:
+    """The peoplelm client; contact identity and consent live there (see `mailerlm.people`)."""
+    if people_for_tests is not None:
+        return People(people_for_tests)
+    url = os.environ.get(PEOPLE_URL_ENV, "")
+    if not url:
+        raise PeopleUnavailable(
+            f"{PEOPLE_URL_ENV} is not set. Add it to .env (see env.example). {PEOPLE_DOCTOR}"
+        )
+    return People(HttpTransport(url))
+
+
 def _guard(work: Callable[[], Board]) -> Board:
     try:
         return work()
@@ -370,8 +393,9 @@ def lists_add(
 
 
 def lists_show() -> Board:
+    people = _people()
     with _transaction() as connection:
-        summary = repository.lists_summary(connection)
+        summary = repository.lists_summary(connection, people)
     return {
         "lists": summary,
         "next": "Run: mailerlm lists add <name>"
@@ -384,15 +408,18 @@ def lists_edit(
     name: str, new_name: str, sender_name: str | None = None, sender_address: str | None = None
 ) -> Board:
     def work() -> Board:
+        people = _people()
         with _transaction() as connection:
             repository.rename_list(connection, name, new_name, sender_name, sender_address)
+            if new_name.strip() != name:
+                people.rename_list(name, new_name.strip())  # its peoplelm tasks follow
         return {"list": new_name, "next": "Run: mailerlm lists show"}
 
     return _guard(work)
 
 
 def lists_delete(name: str) -> Board:
-    """Delete a list and its memberships; the contacts themselves stay."""
+    """Delete a list here; its people and their mailing-list tasks stay in peoplelm as history."""
 
     def work() -> Board:
         with _transaction() as connection:
@@ -419,8 +446,11 @@ def contacts_add(
             raise MailerlmError(
                 "give an email or a LinkedIn profile URL. Run: mailerlm help contacts add"
             )
+        people = _people()
         with _transaction(dry_run) as connection:
-            counts = repository.import_candidates(connection, candidates[:1], list_name, tags)
+            counts = repository.import_candidates(
+                connection, people, candidates[:1], list_name, tags, dry_run
+            )
         return {"dry_run": dry_run, **_counts(counts), "next": "Run: mailerlm contacts find"}
 
     return _guard(work)
@@ -445,8 +475,11 @@ def contacts_import_text(
 
     def work() -> Board:
         candidates, rejected_lines = parsing.parse(text)
+        people = _people()
         with _transaction(dry_run) as connection:
-            counts = repository.import_candidates(connection, candidates, list_name, tags)
+            counts = repository.import_candidates(
+                connection, people, candidates, list_name, tags, dry_run
+            )
         return {
             "dry_run": dry_run,
             "read": len(candidates),
@@ -465,8 +498,9 @@ def contacts_find(
     show_full_addresses: bool = False,
 ) -> Board:
     def work() -> Board:
+        people = _people()
         with _transaction() as connection:
-            rows = repository.find(connection, list_name, tag, status)
+            rows = repository.find(connection, people, list_name, tag, status)
         for row in rows:
             if not show_full_addresses:
                 row["email"] = mask_email(row["email"])
@@ -480,13 +514,11 @@ def contacts_edit(
     contact: str | int, email: str | None, name: str = "", linkedin_url: str | None = None
 ) -> Board:
     def work() -> Board:
+        people = _people()
         with _transaction() as connection:
+            contact_id, person = repository.contact_by_ref(connection, people, contact)
             repository.edit_contact(
-                connection,
-                repository.contact_by_ref(connection, contact),
-                email,
-                name,
-                linkedin_url,
+                connection, people, contact_id, person, email, name, linkedin_url
             )
         return {"edited": True, "next": "Run: mailerlm contacts find"}
 
@@ -494,59 +526,118 @@ def contacts_edit(
 
 
 def contacts_delete(contact: str | int) -> Board:
-    """Remove a contact from every list and tag; the web page asks first."""
+    """Take a contact off every list (in peoplelm) and remove its row and tags here; the person
+    stays in peoplelm. The web page asks first."""
 
     def work() -> Board:
+        people = _people()
         with _transaction() as connection:
-            repository.delete_contact(connection, repository.contact_by_ref(connection, contact))
+            contact_id, person = repository.contact_by_ref(connection, people, contact)
+            for list_name in consent_states.statuses(people, person):
+                consent_states.leave(people, person, list_name)
+            repository.delete_contact(connection, contact_id)
         return {"deleted": True, "next": "Run: mailerlm contacts find"}
 
     return _guard(work)
 
 
 def _change(
-    contact: str | int, dry_run: bool, action: Callable[[sqlite3.Connection, int], bool], verb: str
+    contact: str | int,
+    dry_run: bool,
+    action: Callable[[sqlite3.Connection, People, int, int], bool],
+    verb: str,
 ) -> Board:
+    """One change to one contact. `action(connection, people, contact_id, person_id)` makes it;
+    a dry run hands it None for people and the action only reads."""
+
     def work() -> Board:
+        people = _people()
         with _transaction(dry_run) as connection:
-            changed = action(connection, repository.contact_by_ref(connection, contact))
+            contact_id, person = repository.contact_by_ref(connection, people, contact)
+            changed = action(connection, people, contact_id, person)
         return {"dry_run": dry_run, verb: changed, "next": "Run: mailerlm contacts find"}
 
     return _guard(work)
 
 
 def contacts_tag(email: str | int, tag: str, dry_run: bool = False) -> Board:
-    return _change(email, dry_run, lambda c, i: repository.add_tag(c, i, tag), "tag_added")
+    return _change(email, dry_run, lambda c, _p, i, _n: repository.add_tag(c, i, tag), "tag_added")
 
 
 def contacts_untag(email: str | int, tag: str, dry_run: bool = False) -> Board:
-    return _change(email, dry_run, lambda c, i: repository.remove_tag(c, i, tag), "tag_removed")
+    return _change(
+        email, dry_run, lambda c, _p, i, _n: repository.remove_tag(c, i, tag), "tag_removed"
+    )
 
 
 def contacts_join(email: str | int, list_name: str, dry_run: bool = False) -> Board:
-    return _change(
-        email,
-        dry_run,
-        lambda c, i: repository.join_list(c, i, repository.list_id(c, list_name)),
-        "joined",
-    )
+    """Join a list: a proposed mailing-list task in peoplelm (imported; not mailed until they confirm)."""
+
+    def action(connection: sqlite3.Connection, people: People, _contact: int, person: int) -> bool:
+        repository.list_id(connection, list_name)
+        if dry_run:
+            return people.find_task(person, list_name) is None
+        return people.propose(person, list_name)[1]
+
+    return _change(email, dry_run, action, "joined")
 
 
 def contacts_leave(email: str | int, list_name: str, dry_run: bool = False) -> Board:
-    return _change(
-        email,
-        dry_run,
-        lambda c, i: repository.leave_list(c, i, repository.list_id(c, list_name)),
-        "left",
-    )
+    def action(connection: sqlite3.Connection, people: People, _contact: int, person: int) -> bool:
+        repository.list_id(connection, list_name)
+        if dry_run:
+            task = people.find_task(person, list_name)
+            return task is not None and task["state"] not in ("dropped", "rejected")
+        return consent_states.leave(people, person, list_name)
+
+    return _change(email, dry_run, action, "left")
 
 
 def contacts_do_not_mail(email: str | int, clear: bool = False, dry_run: bool = False) -> Board:
-    def action(connection: sqlite3.Connection, contact_id: int) -> bool:
-        repository.set_do_not_mail(connection, contact_id, not clear)
+    """Do-not-mail is a peoplelm block on the email channel; --clear lifts it."""
+
+    def action(_connection: sqlite3.Connection, people: People, _contact: int, person: int) -> bool:
+        if dry_run:
+            return True
+        if clear:
+            people.unblock_email(person)
+        else:
+            people.block_email(person, "do-not-mail in mailerlm")
         return True
 
     return _change(email, dry_run, action, "do_not_mail_cleared" if clear else "do_not_mail_set")
+
+
+def people_link(mapping: str, dry_run: bool = False) -> Board:
+    """The cutover: record each contact's peoplelm person id from the JSON that
+    `peoplelm import mailerlm <store> --json` prints (its `people` map, contact id -> person id)."""
+
+    def work() -> Board:
+        text = sys.stdin.read() if mapping == "-" else Path(mapping).expanduser().read_text()
+        try:
+            data = json.loads(text)
+        except ValueError as error:
+            raise MailerlmError(f"{mapping} is not JSON: {error}") from error
+        pairs = data.get("people", data) if isinstance(data, dict) else None
+        if not isinstance(pairs, dict) or not pairs:
+            raise MailerlmError(
+                "no `people` map in that JSON. Run: peoplelm import mailerlm <store> --json > people.json"
+            )
+        try:
+            parsed = {int(k): int(v) for k, v in pairs.items()}
+        except (TypeError, ValueError) as error:
+            raise MailerlmError("the `people` map must be contact id -> person id") from error
+        with _transaction(dry_run) as connection:
+            counts = repository.link(connection, parsed)
+        return {
+            "dry_run": dry_run,
+            **counts,
+            "next": "Restart the web app: launchctl kickstart -k gui/$(id -u)/com.nagarkar.mailerlm.serve"
+            if not dry_run
+            else f"Run: mailerlm people link {mapping}",
+        }
+
+    return _guard(work)
 
 
 # ---- settings and templates --------------------------------------------------------------
@@ -952,10 +1043,15 @@ def campaigns_check(name: str) -> Board:
     """Render the campaign and count who it would reach; sends nothing."""
 
     def work() -> Board:
+        people = _people()
         with _transaction() as connection:
             campaign, email = _render(connection, name, "there")
             reach = audience.resolve(
-                connection, tuple(campaign["lists"]), tuple(campaign["tags"]), campaign["kind"]
+                connection,
+                people,
+                tuple(campaign["lists"]),
+                tuple(campaign["tags"]),
+                campaign["kind"],
             )
         problems = list(email.warnings)
         if not campaign["lists"]:
@@ -1021,9 +1117,12 @@ def campaigns_preview(
 
 def overview() -> Board:
     """The home page's numbers."""
+    people = _people()
     with _transaction() as connection:
-        lists = repository.lists_summary(connection)
-        contacts = connection.execute("SELECT COUNT(*) FROM contact").fetchone()[0]
+        lists = repository.lists_summary(connection, people)
+        contacts = connection.execute(
+            "SELECT COUNT(DISTINCT person_id) FROM contact WHERE person_id IS NOT NULL"
+        ).fetchone()[0]
         campaigns = campaigns_repository.campaign_list(connection)
         templates = campaigns_repository.template_list(connection)
         defaults = campaigns_repository.settings_get(connection)
@@ -1096,11 +1195,21 @@ def _message(
     )
 
 
-def _prepare(connection: sqlite3.Connection, name: str) -> dict:
+def _prepare(connection: sqlite3.Connection, name: str, people: People | None) -> dict:
+    """The rendered letter, its sender, who it reaches and the fingerprint. Without `people` (a
+    test send to the owner's own address) the audience is empty and peoplelm is not asked."""
     campaign, email = _render(connection, name, "Friend")
     who = _effective_sender(connection, campaign)
-    reach = audience.resolve(
-        connection, tuple(campaign["lists"]), tuple(campaign["tags"]), campaign["kind"]
+    reach = (
+        audience.resolve(
+            connection,
+            people,
+            tuple(campaign["lists"]),
+            tuple(campaign["tags"]),
+            campaign["kind"],
+        )
+        if people is not None
+        else audience.Audience(())
     )
     problems = list(email.warnings)
     for key, label in (
@@ -1151,8 +1260,9 @@ def sends_plan(name: str) -> Board:
 
     def work() -> Board:
         settings = config.load(paths.config_path())
+        people = _people()
         with _transaction() as connection:
-            plan = _prepare(connection, name)
+            plan = _prepare(connection, name, people)
             today = sending.live_sends_today(connection)
             repeated = sending.already_sent(connection, name, plan["fingerprint"])
         reach, who = plan["reach"], plan["sender"]
@@ -1194,29 +1304,35 @@ def sends_plan(name: str) -> Board:
 
 
 def _execute(send_id: int, name: str, kind: str) -> dict[str, int]:
+    """Run a send. A live one needs peoplelm (the send guard and the log): without it nothing
+    goes out and the error names `peoplelm doctor`; a test send asks no one."""
     sender = _sender()
+    people = _people() if kind == "live" else None
     connection = _open()
     running_sends.add(send_id)
     try:
+        subject = sending.get_send(connection, send_id)["subject"]
         result = sending.run_send(
             connection,
             send_id,
             sender,
             lambda recipient, key: _message(connection, name, recipient, key),
+            people=people,
+            summary=subject,
             pause_seconds=_pause(sender),
         )
-        if kind == "live":
+        if people is not None:
             campaign = campaigns_repository.campaign_get(connection, name)
             if campaign["kind"] == "confirmation":
-                sent = [
-                    r[0]
-                    for r in connection.execute(
-                        "SELECT contact_id FROM delivery WHERE send_id = ? AND status = 'sent' AND contact_id IS NOT NULL",
-                        (send_id,),
-                    )
-                ]
-                list_ids = [repository.list_id(connection, n) for n in campaign["lists"]]
-                consent_states.mark_pending(connection, sent, list_ids)
+                # the send guard moved the list each letter was logged under; the rest follow
+                for (contact_id,) in connection.execute(
+                    "SELECT contact_id FROM delivery WHERE send_id = ? AND status = 'sent' "
+                    "AND contact_id IS NOT NULL",
+                    (send_id,),
+                ).fetchall():
+                    person = repository.person_id(connection, contact_id)
+                    if person is not None:
+                        consent_states.mark_pending(people, person, campaign["lists"])
         return result
     finally:
         running_sends.discard(send_id)
@@ -1229,7 +1345,7 @@ def sends_test(name: str) -> Board:
     def work() -> Board:
         sender = _sender()
         with _transaction() as connection:
-            plan = _prepare(connection, name)
+            plan = _prepare(connection, name, None)
             blockers = [
                 p
                 for p in plan["problems"]
@@ -1269,11 +1385,15 @@ def sends_start(name: str, fingerprint: str, background: bool = False) -> Board:
 
     def work() -> Board:
         _sender()  # fail before anything is recorded when the key is missing
+        people = _people()
         with _transaction() as connection:
-            plan = _prepare(connection, name)
+            plan = _prepare(connection, name, people)
+            reach = plan["reach"]
             recipients = [
-                sending.Recipient(i, e, "there")
-                for i, e in zip(plan["reach"].contact_ids, plan["reach"].emails, strict=True)
+                sending.Recipient(i, e, "there", list_name)
+                for i, e, list_name in zip(
+                    reach.contact_ids, reach.emails, reach.lists, strict=True
+                )
             ]
             send_id = sending.create_send(
                 connection,
@@ -1339,9 +1459,10 @@ def sends_poll(send: int | None = None) -> Board:
 
     def work() -> Board:
         sender = _sender()
+        people = _people()
         try:
             with _transaction() as connection:
-                changed = sending.poll(connection, sender, send)
+                changed = sending.poll(connection, sender, people, send)
         except SenderError as error:
             hint = (
                 " Resend only lets a full-access key read delivery status; this key is send-only."
@@ -1416,7 +1537,7 @@ def replies_check() -> Board:
 def _replies_check() -> Board:
     def work() -> Board:
         settings = config.load(paths.config_path())
-        reader, classifier = _reader(), _classifier()
+        reader, classifier, people = _reader(), _classifier(), _people()
         connection = (
             _open()
         )  # no transaction around the mailbox and TypeSafe calls; each reply commits on its own
@@ -1425,6 +1546,7 @@ def _replies_check() -> Board:
                 connection,
                 reader,
                 classifier,
+                people,
                 settings.get("classifier", "model"),
                 settings.get("classifier", "unsubscribe_min_probability"),
                 settings.get("classifier", "confirm_min_probability"),
@@ -1463,14 +1585,16 @@ def replies_decide(reply: int, decision: str) -> Board:
     """Your word on a reply: confirmed, unsubscribed or ignored (an earlier automatic pick is undone first)."""
 
     def work() -> Board:
+        people = _people()
         with _transaction() as connection:
-            return inbox_service.decide(connection, reply, decision)
+            return inbox_service.decide(connection, people, reply, decision)
 
     return _guard(work)
 
 
 def replies_undo(reply: int) -> Board:
-    """Undo an automatic decision: memberships go back as they were and the reply returns to the queue."""
+    """Return a reply to the queue. A decision that moved a membership in peoplelm cannot be undone
+    from here (peoplelm's moves are one-way) and this says so."""
 
     def work() -> Board:
         with _transaction() as connection:

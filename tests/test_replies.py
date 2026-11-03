@@ -90,13 +90,13 @@ def test_the_gate_is_asymmetric_a_wrong_yes_costs_more_than_a_wrong_stop(world):
     assert statuses()["ada@example.com"] == "pending"
 
 
-def test_a_yes_from_someone_who_was_never_asked_waits_for_the_owner(world):
+def test_a_yes_from_someone_who_was_never_asked_waits_for_the_owner(world, people):
     api.contacts_import_text("Eve: eve@example.com", "book-interest")  # imported, never mailed
     api.sends_start("c", api.sends_plan("c")["fingerprint"]) if False else None
-    with api._transaction() as connection:
-        connection.execute(
-            "UPDATE membership SET status = 'imported' WHERE contact_id = (SELECT id FROM contact WHERE email = 'ada@example.com')"
-        )
+    ada = api._people().lookup_email("ada@example.com")
+    assert ada is not None
+    task = people.tasks[api._people().find_task(int(ada["id"]), "book-interest")["id"]]
+    task["state"] = "proposed"  # as if the letter had never reached her
     use(world, [reply("1", "ada@example.com", "yes")], {"yes": ("confirm_subscription", 0.99)})
     assert api.replies_check()["queued"] == 1
     assert statuses()["ada@example.com"] == "imported"
@@ -164,7 +164,7 @@ def test_jev_sees_the_thread_without_the_quoted_letter(world):
     assert state["their_membership_statuses"] == ["pending"]
 
 
-def test_the_owner_settles_the_queue_and_can_undo_an_automatic_pick(world):
+def test_the_owner_settles_the_queue(world):
     use(
         world,
         [reply("1", "ada@example.com", "hmm"), reply("2", "grace@example.com", "stop it")],
@@ -174,16 +174,34 @@ def test_the_owner_settles_the_queue_and_can_undo_an_automatic_pick(world):
     queued = next(r for r in api.replies_list()["replies"] if r["decision"] == "queued")
     api.replies_decide(queued["id"], "confirmed")
     assert statuses()["ada@example.com"] == "subscribed"
-    auto = next(r for r in api.replies_list()["replies"] if r["decision"] == "unsubscribed")
-    api.replies_undo(auto["id"])
-    assert statuses()["grace@example.com"] == "pending"
-    assert (
-        next(r for r in api.replies_list()["replies"] if r["id"] == auto["id"])["decision"]
-        == "queued"
-    )
-    api.replies_decide(auto["id"], "ignored")
     with pytest.raises(MailerlmError, match="confirmed, unsubscribed or ignored"):
-        api.replies_decide(auto["id"], "maybe")
+        api.replies_decide(queued["id"], "maybe")
+
+
+def test_an_automatic_pick_cannot_be_undone_once_peoplelm_has_it(world):
+    """peoplelm's task moves are one-way: undo and a different word decline and change nothing."""
+    use(world, [reply("2", "grace@example.com", "stop it")], {"stop it": ("unsubscribe", 0.95)})
+    api.replies_check()
+    auto = next(r for r in api.replies_list()["replies"] if r["decision"] == "unsubscribed")
+    with pytest.raises(MailerlmError, match="one-way"):
+        api.replies_undo(auto["id"])
+    with pytest.raises(MailerlmError, match="one-way"):
+        api.replies_decide(auto["id"], "confirmed")
+    assert api.replies_decide(auto["id"], "unsubscribed") == {"moved": 0}
+    assert statuses()["grace@example.com"] == "unsubscribed"
+
+
+def test_every_reply_read_is_logged_in_peoplelm(world, people):
+    use(
+        world,
+        [reply("7", "ada@example.com", "Who is this?")],
+        {"who is this": ("question_or_comment", 0.99)},
+    )
+    api.replies_check()
+    logged = [t for t in people.touches if t["direction"] == "in"]
+    assert [(t["channel"], t["kind"], t["producer"], t["ref"]) for t in logged] == [
+        ("email", "reply", "mailerlm", "7")
+    ]
 
 
 def test_nothing_is_read_before_the_first_live_send(tmp_path, monkeypatch):

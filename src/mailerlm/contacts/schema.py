@@ -39,3 +39,11 @@ CREATE TABLE tag (
     PRIMARY KEY (contact_id, name)
 ) STRICT
 """
+
+# The peoplelm person each contact is (owner, 2026-10-25): set by `mailerlm people link` from
+# peoplelm's import mapping, and for every contact added since. NULL: not linked, never mailed.
+# After the link, email, name, do_not_mail and the membership statuses are history; peoplelm decides.
+PERSON_MIGRATION = """
+ALTER TABLE contact ADD COLUMN person_id INTEGER;
+CREATE INDEX contact_person ON contact (person_id)
+"""

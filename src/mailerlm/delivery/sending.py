@@ -14,8 +14,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
+from mailerlm.consent import states as consent_states
 from mailerlm.contacts import repository as contacts_repository
 from mailerlm.delivery.sender import MailSender, OutgoingMessage, SenderError
+from mailerlm.people.client import People, PeopleError, PeopleUnavailable
 
 TERMINAL = {"bounced", "complained", "failed"}
 
@@ -25,6 +27,7 @@ class Recipient:
     contact_id: int | None
     email: str
     first_name: str
+    list_name: str | None = None  # the list it is sent for: the send guard's scope
 
 
 def _stamp(now: Callable[[], datetime]) -> str:
@@ -80,10 +83,20 @@ def create_send(
     send_id = int(cursor.lastrowid or 0)
     for recipient in recipients:
         connection.execute(
-            "INSERT INTO delivery (send_id, contact_id, email, status, updated_at) VALUES (?, ?, ?, 'queued', ?)",
-            (send_id, recipient.contact_id, recipient.email, stamp),
+            "INSERT INTO delivery (send_id, contact_id, email, status, updated_at, scope) "
+            "VALUES (?, ?, ?, 'queued', ?, ?)",
+            (send_id, recipient.contact_id, recipient.email, stamp, recipient.list_name),
         )
     return send_id
+
+
+def _fail(
+    connection: sqlite3.Connection, delivery_id: int, error: str, now: Callable[[], datetime]
+) -> None:
+    connection.execute(
+        "UPDATE delivery SET status = 'failed', error = ?, updated_at = ? WHERE id = ?",
+        (error[:300], _stamp(now), delivery_id),
+    )
 
 
 def run_send(
@@ -91,32 +104,65 @@ def run_send(
     send_id: int,
     sender: MailSender,
     build_message: Callable[[Recipient, str], OutgoingMessage],
+    people: People | None = None,
+    summary: str = "",
     pause_seconds: float = 0.0,
     sleep: Callable[[float], None] = time.sleep,
     now: Callable[[], datetime] = datetime.now,
 ) -> dict[str, int]:
-    """Send every queued row of this send; returns the counts by status. Safe to call again."""
+    """Send every queued row of this send; returns the counts by status. Safe to call again.
+
+    A row for a contact asks peoplelm's send guard first (a row it holds back becomes `failed`
+    with the guard's reasons) and is logged with `guard_send` once the provider took it. When
+    peoplelm does not answer the run stops with `PeopleUnavailable`, the rest still queued. A row
+    without a contact is a test send to the owner's own address and asks no one."""
     connection.execute(
         "UPDATE send SET started_at = COALESCE(started_at, ?) WHERE id = ?", (_stamp(now), send_id)
     )
     rows = connection.execute(
-        "SELECT id, contact_id, email FROM delivery WHERE send_id = ? AND status = 'queued' ORDER BY id",
+        "SELECT id, contact_id, email, scope FROM delivery WHERE send_id = ? AND status = 'queued' ORDER BY id",
         (send_id,),
     ).fetchall()
-    for position, (delivery_id, contact_id, email) in enumerate(rows):
+    for position, (delivery_id, contact_id, email, scope) in enumerate(rows):
+        person = contacts_repository.person_id(connection, contact_id)
+        if contact_id is not None:
+            if person is None or people is None or not scope:
+                _fail(
+                    connection, delivery_id, "not linked to peoplelm: run mailerlm people link", now
+                )
+                continue
+            verdict = people.check(person, scope)
+            if not verdict["allowed"]:
+                _fail(
+                    connection,
+                    delivery_id,
+                    "held by the send guard: " + "; ".join(verdict["reasons"]),
+                    now,
+                )
+                continue
         first_name = _first_name(connection, contact_id)
         key = f"mailerlm-send-{send_id}-{email}"
         try:
-            provider_id = sender.send(build_message(Recipient(contact_id, email, first_name), key))
+            provider_id = sender.send(
+                build_message(Recipient(contact_id, email, first_name, scope), key)
+            )
+        except SenderError as error:
+            _fail(connection, delivery_id, str(error), now)
+        else:
             connection.execute(
                 "UPDATE delivery SET status = 'sent', provider_id = ?, error = NULL, updated_at = ? WHERE id = ?",
                 (provider_id, _stamp(now), delivery_id),
             )
-        except SenderError as error:
-            connection.execute(
-                "UPDATE delivery SET status = 'failed', error = ?, updated_at = ? WHERE id = ?",
-                (str(error)[:300], _stamp(now), delivery_id),
-            )
+            if person is not None and people is not None and scope:
+                try:
+                    people.record_send(person, scope, delivery_id, summary)
+                except (PeopleError, PeopleUnavailable) as error:
+                    connection.execute(
+                        "UPDATE delivery SET error = ? WHERE id = ?",
+                        (f"sent; peoplelm did not log it: {error}"[:300], delivery_id),
+                    )
+                    if isinstance(error, PeopleUnavailable):
+                        raise
         if pause_seconds and position < len(rows) - 1:
             sleep(pause_seconds)
     if not connection.execute(
@@ -184,10 +230,13 @@ def list_sends(
 def poll(
     connection: sqlite3.Connection,
     sender: MailSender,
+    people: People,
     send_id: int | None = None,
     now: Callable[[], datetime] = datetime.now,
 ) -> dict[str, int]:
-    """Ask the provider about every sent row not yet final; bounces and complaints block the person."""
+    """Ask the provider about every sent row not yet final; a bounce or complaint blocks the
+    person's email in peoplelm and rejects their memberships (before the row changes, so a
+    peoplelm outage leaves the row to be polled again)."""
     where = "AND send_id = ?" if send_id else ""
     rows = connection.execute(
         f"SELECT id, contact_id, provider_id, status FROM delivery WHERE provider_id IS NOT NULL "
@@ -199,12 +248,15 @@ def poll(
         event = sender.status(provider_id)
         if event.status == status:
             continue
+        person = contacts_repository.person_id(connection, contact_id)
+        if event.status in ("bounced", "complained") and person is not None:
+            consent_states.suppress(
+                people, person, f"{event.status} (mailerlm delivery {delivery_id})"
+            )
+            changed["blocked"] += 1
         connection.execute(
             "UPDATE delivery SET status = ?, updated_at = ? WHERE id = ?",
             (event.status, _stamp(now), delivery_id),
         )
         changed["updated"] += 1
-        if event.status in ("bounced", "complained") and contact_id is not None:
-            contacts_repository.set_do_not_mail(connection, contact_id, True)
-            changed["blocked"] += 1
     return changed

@@ -38,3 +38,6 @@ CREATE TABLE delivery (
 
 # What the letter said, kept so a reply can be read in its thread (the first recipient's plain text, trimmed).
 EXCERPT_MIGRATION = "ALTER TABLE send ADD COLUMN excerpt TEXT NOT NULL DEFAULT ''"
+
+# The list a delivery was sent for (the peoplelm task scope its send-guard check and log use).
+SCOPE_MIGRATION = "ALTER TABLE delivery ADD COLUMN scope TEXT"

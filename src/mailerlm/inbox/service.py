@@ -16,9 +16,11 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from mailerlm.consent import states
+from mailerlm.contacts import repository as contacts_repository
 from mailerlm.inbox import text as text_tools
 from mailerlm.inbox.classifier import Classifier, ClassifierError, Judgment
 from mailerlm.inbox.reader import MailReader, RawMessage
+from mailerlm.people.client import People
 
 AUTOMATIC_SENDER = re.compile(r"(mailer-daemon|postmaster|no-?reply|do-not-reply)@", re.I)
 _PREFIX = re.compile(r"^\s*(re|fwd?)\s*:\s*", re.I)
@@ -90,13 +92,9 @@ def _our_last_message(connection: sqlite3.Connection, contact_id: int) -> dict:
     )
 
 
-def _statuses(connection: sqlite3.Connection, contact_id: int) -> set[str]:
-    return {
-        r[0]
-        for r in connection.execute(
-            "SELECT status FROM membership WHERE contact_id = ?", (contact_id,)
-        )
-    }
+def _statuses(people: People, person: int | None) -> set[str]:
+    """Their membership statuses, read from peoplelm; none for a contact never linked."""
+    return set(states.statuses(people, person).values()) if person is not None else set()
 
 
 def _store(
@@ -138,6 +136,7 @@ def check(
     connection: sqlite3.Connection,
     reader: MailReader,
     classifier: Classifier,
+    people: People,
     model: str,
     unsubscribe_min: float,
     confirm_min: float,
@@ -173,6 +172,7 @@ def check(
             )
             continue
         counts["new"] += 1
+        person = contacts_repository.person_id(connection, contact_id)
         body = text_tools.strip_quoted(message.body)
         last = _our_last_message(connection, contact_id)
         if _is_automatic(message):
@@ -193,7 +193,7 @@ def check(
         state = {
             "our_last_message": last,
             "their_reply": {"subject": message.subject[:200], "text": body},
-            "their_membership_statuses": sorted(_statuses(connection, contact_id)),
+            "their_membership_statuses": sorted(_statuses(people, person)),
         }
         try:
             judgment = classifier.classify(state, model)
@@ -204,15 +204,22 @@ def check(
         connection.execute("BEGIN")
         decision, changes = "queued", []
         probability = judgment.probability(judgment.choice)
-        if judgment.choice == "unsubscribe" and probability >= unsubscribe_min:
-            changes = states.unsubscribe(connection, contact_id, now)
+        if person is not None:
+            people.log_reply(person, message.message_id, message.subject[:200])
+        if (
+            judgment.choice == "unsubscribe"
+            and probability >= unsubscribe_min
+            and person is not None
+        ):
+            changes = states.unsubscribe(people, person)
             decision = "unsubscribed" if changes else "queued"
         elif (
             judgment.choice == "confirm_subscription"
             and probability >= confirm_min
-            and "pending" in _statuses(connection, contact_id)
+            and person is not None
+            and "pending" in _statuses(people, person)
         ):
-            changes = states.confirm(connection, contact_id, now)
+            changes = states.confirm(people, person)
             decision = "confirmed" if changes else "queued"
         _store(
             connection,
@@ -273,13 +280,20 @@ def _get(connection: sqlite3.Connection, reply_id: int) -> tuple[int, list[dict]
     return row[0], json.loads(row[1]), row[2]
 
 
-def undo(
-    connection: sqlite3.Connection, reply_id: int, now: Callable[[], datetime] = datetime.now
-) -> None:
-    """Put the memberships back as they were and return the reply to the queue."""
-    contact_id, changes, _ = _get(connection, reply_id)
-    if contact_id is not None and changes:
-        states.restore(connection, contact_id, changes, now)
+ONE_WAY = (
+    "peoplelm keeps consent moves one-way, so mailerlm cannot put this back; "
+    "change the person's mailing-list task on the peoplelm page"
+)
+
+
+def undo(connection: sqlite3.Connection, reply_id: int) -> None:
+    """Return the reply to the queue. A decision that moved a membership in peoplelm cannot be
+    put back from here: peoplelm's task moves are one-way, so this declines with the reason."""
+    from mailerlm.errors import MailerlmError
+
+    _, changes, _ = _get(connection, reply_id)
+    if changes:
+        raise MailerlmError(ONE_WAY)
     connection.execute(
         "UPDATE reply SET decision = 'queued', decided_by = 'owner', changes = '[]' WHERE id = ?",
         (reply_id,),
@@ -288,25 +302,31 @@ def undo(
 
 def decide(
     connection: sqlite3.Connection,
+    people: People,
     reply_id: int,
     decision: str,
-    now: Callable[[], datetime] = datetime.now,
 ) -> dict:
-    """The owner's word: confirmed, unsubscribed or ignored. An earlier automatic decision is undone first."""
+    """The owner's word: confirmed, unsubscribed or ignored. An earlier automatic decision that
+    moved a membership stands (peoplelm's moves are one-way); the same word again changes nothing."""
     from mailerlm.errors import MailerlmError
 
     if decision not in ("confirmed", "unsubscribed", "ignored"):
         raise MailerlmError("decide as confirmed, unsubscribed or ignored")
     contact_id, changes, previous = _get(connection, reply_id)
     if previous != "queued" and changes:
-        undo(connection, reply_id, now)
-    if contact_id is None and decision != "ignored":
-        raise MailerlmError("this reply is from someone no longer in your contacts")
+        if decision == previous:
+            return {"moved": 0}
+        raise MailerlmError(ONE_WAY)
+    person = contacts_repository.person_id(connection, contact_id)
+    if person is None and decision != "ignored":
+        raise MailerlmError(
+            "this reply is from someone no longer in your contacts or not linked to peoplelm"
+        )
     moved: list[dict] = []
-    if decision == "confirmed":
-        moved = states.confirm(connection, contact_id, now)
-    elif decision == "unsubscribed":
-        moved = states.unsubscribe(connection, contact_id, now)
+    if decision == "confirmed" and person is not None:
+        moved = states.confirm(people, person, "owner")
+    elif decision == "unsubscribed" and person is not None:
+        moved = states.unsubscribe(people, person, "owner")
     connection.execute(
         "UPDATE reply SET decision = ?, decided_by = 'owner', changes = ? WHERE id = ?",
         (decision, json.dumps(moved), reply_id),

@@ -4,4 +4,6 @@
 
 Each journey is proven by the test named beside it.
 
-None yet: mark end-to-end tests with `@pytest.mark.cuj("...")`.
+## `tests/test_people.py`
+
+- a campaign reaches only accepted list members whose email is not blocked, each send logged in peoplelm (`tests/test_people.py::test_a_campaign_reaches_only_accepted_unblocked_members_each_send_logged`)

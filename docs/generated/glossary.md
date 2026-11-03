@@ -10,12 +10,15 @@
 - **fingerprint** (`mailerlm.delivery`): a short code of the exact letter, sender and audience a plan showed.
 - **linkedin status** (`mailerlm.linkedin`): where a contact stands in the move from a LinkedIn conversation to a confirmed email subscription.
 - **list** (`mailerlm.contacts`): a named audience a campaign is sent to; a contact may be on several.
-- **membership** (`mailerlm.contacts`): a contact's place on one list, with its consent status.
+- **membership** (`mailerlm.contacts`): a contact's place on one list, with its consent status: a peoplelm `mailing-list` task.
 - **needs-you queue** (`mailerlm.consent`): replies the classifier did not settle, waiting for the owner.
+- **person** (`mailerlm.people`): peoplelm's record of one human; a mailerlm contact row points at it by `person_id`.
 - **reply** (`mailerlm.inbox`): a message from someone mailerlm has mailed, stored with the letter it answers and what was decided.
 - **send** (`mailerlm.delivery`): one campaign delivered (or tested) to one audience, with a row per recipient.
+- **send guard** (`mailerlm.people`): peoplelm's answer to "may I write to this person now, for this purpose?".
 - **starter** (`mailerlm.campaigns`): a shipped campaign text that a new campaign is created from.
 - **tag** (`mailerlm.contacts`): a free label on a contact, such as `early-access`, used to narrow a campaign's audience.
+- **task** (`mailerlm.people`): peoplelm's record of one purpose with one person; here, a membership of one list.
 - **template** (`mailerlm.campaigns`): the HTML and text frame a campaign body is placed in.
 - **thread** (`mailerlm.editor`): the stored conversation between the owner and the model about one template.
 - **value** (`mailerlm.campaigns`): a named piece of text a campaign substitutes into its subject and body, such as `book_title`.
