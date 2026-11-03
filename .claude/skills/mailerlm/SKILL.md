@@ -30,7 +30,7 @@ Verbs today (more arrive with the implementation issues; each prints a board, `-
 Rules that already hold:
 
 - Contact data (emails, replies, the footer address) lives only in the private workspace; never print it in chat, issues, PRs or commits.
-- A live send is the owner's act (Send on the review page, or `mailerlm send <campaign> --yes` in the owner's own terminal). Agents run `--dry-run` and test sends to the owner's own address only.
+- A live send is the owner's act (Send on the review page, or `mailerlm sends start <campaign> --fingerprint <fingerprint>` in the owner's own terminal, with the fingerprint from `mailerlm sends plan <campaign>`). Agents run `sends plan` (it sends nothing) and `sends test` to the owner's own address only.
 - Consent changes come from replies or the owner; an agent never edits a contact's consent by hand.
 
 ## Merging
