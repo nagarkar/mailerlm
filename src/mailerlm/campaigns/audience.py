@@ -1,9 +1,35 @@
-"""Who a campaign would reach: the people on its lists who may be mailed right now."""
+"""Who a campaign would reach: the people on its lists who may be mailed right now, and whether
+that audience is a test list (then the subject says so)."""
 
 from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
+
+TEST_SUBJECT_PREFIX = "Testing: "
+
+
+def is_test(connection: sqlite3.Connection, lists: tuple[str, ...]) -> bool:
+    """True when the campaign names at least one list and every list it names is a test list.
+    One real list among them makes it a real send, which must look exactly like one."""
+    if not lists:
+        return False
+    marks = ",".join("?" for _ in lists)
+    flags = [
+        row[0]
+        for row in connection.execute(
+            f"SELECT is_test FROM mailing_list WHERE name IN ({marks})", lists
+        )
+    ]
+    return bool(flags) and all(flags)
+
+
+def test_subject(subject: str) -> str:
+    """`subject` as a test list receives it: "Testing: " in front, once; an empty subject stays empty."""
+    stripped = subject.strip()
+    if not stripped or stripped.lower().startswith(TEST_SUBJECT_PREFIX.strip().lower()):
+        return subject
+    return TEST_SUBJECT_PREFIX + stripped
 
 
 @dataclass(frozen=True, slots=True)

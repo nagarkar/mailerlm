@@ -17,6 +17,7 @@
 - **starter** (`mailerlm.campaigns`): a shipped campaign text that a new campaign is created from.
 - **tag** (`mailerlm.contacts`): a free label on a contact, such as `early-access`, used to narrow a campaign's audience.
 - **template** (`mailerlm.campaigns`): the HTML and text frame a campaign body is placed in.
+- **test list** (`mailerlm.contacts`): a list marked for trying a letter out; mail to it says "Testing: " before the subject.
 - **thread** (`mailerlm.editor`): the stored conversation between the owner and the model about one template.
 - **value** (`mailerlm.campaigns`): a named piece of text a campaign substitutes into its subject and body, such as `book_title`.
 - **workspace** (`mailerlm`): the private directory holding the SQLite store (contacts, campaigns, templates, images), logs and token files.
