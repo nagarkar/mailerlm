@@ -90,6 +90,27 @@ function inlineConfirm(label, onConfirm, what) {
   return slot;
 }
 
+// Confirming someone yourself always asks why; common reasons are offered, any text will do.
+const CONFIRM_REASONS = ["known personally", "confirmed by email", "confirmed in person"];
+
+function reasonAsk(label, what, onReason) {
+  const slot = h("span");
+  const ask = h("button", { on: { click: () => {
+    const listId = `reasons-${Math.random().toString(36).slice(2)}`;
+    const input = text("", { placeholder: "reason, e.g. known personally", list: listId, style: "max-width:220px" });
+    slot.replaceChildren(h("span", { class: "small" }, `${what} `), input,
+      h("datalist", { id: listId }, CONFIRM_REASONS.map((r) => h("option", { value: r }))),
+      h("button", { class: "primary", on: { click: () => {
+        if (!input.value.trim()) { input.focus(); toast("A reason is required"); return; }
+        onReason(input.value.trim());
+      } } }, "Confirm"),
+      h("button", { on: { click: () => slot.replaceChildren(ask) } }, "Cancel"));
+    input.focus();
+  } } }, label);
+  slot.append(ask);
+  return slot;
+}
+
 function field(label, input) { return h("div", {}, h("label", {}, label), input); }
 function text(value, props) { return h("input", { type: "text", value: value || "", ...props }); }
 
@@ -234,6 +255,7 @@ async function listPage(name) {
   };
   return h("div", {}, h("p", {}, h("a", { href: "#/lists" }, "← All lists")), h("h1", {}, list.name, list.test ? h("span", { class: "chip imported", style: "margin-left:10px;vertical-align:middle" }, "test list") : null),
     editable("List details", view, form, refresh),
+    confirmPanel(name),
     importPanel(name),
     h("section", { class: "panel" }, h("header", {}, h("h2", {}, `People on this list (${people.count})`)),
       people.contacts.length ? people.contacts.map((person) => personRow(person, allLists, name)) : h("p", { class: "empty" }, "Nobody yet. Paste some people above.")));
@@ -279,12 +301,17 @@ function personRow(person, allLists, contextList) {
           } } }, person.do_not_mail ? "Lift do-not-mail" : "Do not mail"),
           inlineConfirm("Delete", async () => { if (await attempt(() => api("contacts_delete", { contact: person.id }), "Deleted")) refresh(); }, "Delete this person everywhere"))),
       h("div", { class: "chips", style: "margin-top:6px" },
-        Object.entries(person.lists).map(([listName, status]) => h("span", { class: `chip ${status}` }, listName, ": ", status,
+        Object.entries(person.lists).map(([listName, status]) => h("span", { class: `chip ${status}`, title: person.confirmed && person.confirmed[listName] ? `confirmed ${person.confirmed[listName]}` : "" }, listName, ": ", status,
+          person.confirmed && person.confirmed[listName] ? ` (${person.confirmed[listName]})` : "",
           h("button", { title: "Remove from this list", on: { click: async () => { if (await attempt(() => api("contacts_leave", { email: person.id, list_name: listName }), "Removed from list")) refresh(); } } }, "×"))),
         person.tags.map((tag) => h("span", { class: "chip" }, tag, h("button", { title: "Remove tag", on: { click: async () => { if (await attempt(() => api("contacts_untag", { email: person.id, tag }))) refresh(); } } }, "×"))),
         person.do_not_mail ? h("span", { class: "chip bad" }, "do not mail") : null),
       h("div", { class: "row", style: "margin-top:8px" }, tagInput,
-        h("button", { on: { click: async () => { if (tagInput.value.trim() && await attempt(() => api("contacts_tag", { email: person.id, tag: tagInput.value }))) refresh(); } } }, "Tag"), joinSelect));
+        h("button", { on: { click: async () => { if (tagInput.value.trim() && await attempt(() => api("contacts_tag", { email: person.id, tag: tagInput.value }))) refresh(); } } }, "Tag"), joinSelect,
+        ...Object.entries(person.lists).filter(([, status]) => status === "imported" || status === "pending").filter(([listName]) => !contextList || listName === contextList)
+          .map(([listName]) => reasonAsk(`Confirm on ${listName} myself`, `No confirmation letter for ${listName}, because:`, async (reason) => {
+            if (await attempt(() => api("contacts_confirm", { contact: person.id, list_name: listName, reason }), "Confirmed")) refresh();
+          }))));
   };
   const edit = () => {
     const name = text(person.name), email = text(person.email), linkedin = text(person.linkedin_url);
@@ -295,6 +322,27 @@ function personRow(person, allLists, contextList) {
   };
   draw();
   return wrap;
+}
+
+// Confirm everyone on a list yourself: a dry run shows who would change, then one click does it.
+function confirmPanel(name) {
+  const result = h("div");
+  const show = (out, label) => h("div", { class: "notice" },
+    h("div", {}, h("strong", {}, `${label}: `), (out.would_confirm || out.confirmed).map((p) => `${p.name || "(no name)"} ${p.email}`).join(", ") || "nobody"),
+    out.already_subscribed ? h("div", { class: "small" }, `${out.already_subscribed} already subscribed`) : null,
+    out.declined.length ? h("div", { class: "small" }, "Left as they are: " + out.declined.map((p) => `${p.name || p.email} (${p.why})`).join(", ")) : null);
+  const ask = reasonAsk("Confirm everyone on this list myself…", "No confirmation letters, because:", async (reason) => {
+    const dry = await attempt(() => api("lists_confirm", { list_name: name, reason, dry_run: true }));
+    if (!dry) return;
+    result.replaceChildren(show(dry, `Would confirm (“${dry.reason}”)`),
+      (dry.would_confirm.length ? h("button", { class: "primary", on: { click: async () => {
+        const done = await attempt(() => api("lists_confirm", { list_name: name, reason }), "Confirmed");
+        if (done) { result.replaceChildren(show(done, "Confirmed")); refresh(); }
+      } } }, `Yes, confirm ${plural(dry.would_confirm.length, "person", "people")}`) : ""));
+  });
+  return h("section", { class: "panel" }, h("header", {}, h("h2", {}, "Confirm without a letter")),
+    h("p", { class: "small" }, "For people who already told you yes, for example friends you know personally. Each confirmation records your reason. It applies to this list only, and never to anyone marked do-not-mail, unsubscribed or suppressed."),
+    ask, result);
 }
 
 async function contactsPage() {

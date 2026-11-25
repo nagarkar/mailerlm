@@ -4,6 +4,7 @@
 
 - **audience** (`mailerlm.campaigns`): the subscribed members of the lists chosen for a send that carry the campaign's tags.
 - **campaign** (`mailerlm.campaigns`): one letter with its subject, body, values, lists, tags and flags, sent once.
+- **confirmed by owner** (`mailerlm.consent`): a membership the owner confirmed without a letter, with a reason such as "known personally".
 - **contact** (`mailerlm.contacts`): one person, identified by a normalized email address and optionally a LinkedIn profile URL.
 - **double opt-in** (`mailerlm.consent`): a contact is mailed campaigns only after replying yes to a confirmation email.
 - **draft** (`mailerlm.editor`): the one unsaved version of a template; absent when it equals the saved version.

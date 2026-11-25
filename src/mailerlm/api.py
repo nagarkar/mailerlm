@@ -443,8 +443,10 @@ def contacts_add(
     list_name: str | None = None,
     tags: tuple[str, ...] = (),
     dry_run: bool = False,
+    confirm_reason: str | None = None,
 ) -> Board:
-    """Add one contact (an email, a LinkedIn URL, or both) and optionally join a list."""
+    """Add one contact (an email, a LinkedIn URL, or both) and optionally join a list; with
+    `confirm_reason`, the owner also confirms them on that list (see `contacts_confirm`)."""
 
     def work() -> Board:
         text = " ".join(part for part in (name and f"{name}:", email, linkedin_url) if part)
@@ -453,41 +455,186 @@ def contacts_add(
             raise MailerlmError(
                 "give an email or a LinkedIn profile URL. Run: mailerlm help contacts add"
             )
+        _confirm_needs_list(list_name, confirm_reason)
+        ids: list[int] = []
         with _transaction(dry_run) as connection:
-            counts = repository.import_candidates(connection, candidates[:1], list_name, tags)
-        return {"dry_run": dry_run, **_counts(counts), "next": "Run: mailerlm contacts find"}
+            counts = repository.import_candidates(
+                connection, candidates[:1], list_name, tags, contact_ids=ids
+            )
+            confirmed = _confirm_on_import(connection, ids, list_name, confirm_reason)
+        return {
+            "dry_run": dry_run,
+            **_counts(counts),
+            **confirmed,
+            "next": "Run: mailerlm contacts find",
+        }
 
     return _guard(work)
 
 
 def contacts_import(
-    source: str, list_name: str | None = None, tags: tuple[str, ...] = (), dry_run: bool = False
+    source: str,
+    list_name: str | None = None,
+    tags: tuple[str, ...] = (),
+    dry_run: bool = False,
+    confirm_reason: str | None = None,
 ) -> Board:
     """Import pasted text or a CSV from a file (`-` reads standard input)."""
 
     def work() -> Board:
         text = sys.stdin.read() if source == "-" else Path(source).expanduser().read_text()
-        return contacts_import_text(text, list_name, tags, dry_run)
+        return contacts_import_text(text, list_name, tags, dry_run, confirm_reason)
 
     return _guard(work)
 
 
 def contacts_import_text(
-    text: str, list_name: str | None = None, tags: tuple[str, ...] = (), dry_run: bool = False
+    text: str,
+    list_name: str | None = None,
+    tags: tuple[str, ...] = (),
+    dry_run: bool = False,
+    confirm_reason: str | None = None,
 ) -> Board:
-    """Import pasted text or CSV given as text (the web page's form)."""
+    """Import pasted text or CSV given as text (the web page's form); with `confirm_reason`, the
+    owner also confirms everyone read on that list (see `contacts_confirm`)."""
 
     def work() -> Board:
         candidates, rejected_lines = parsing.parse(text)
+        _confirm_needs_list(list_name, confirm_reason)
+        ids: list[int] = []
         with _transaction(dry_run) as connection:
-            counts = repository.import_candidates(connection, candidates, list_name, tags)
+            counts = repository.import_candidates(
+                connection, candidates, list_name, tags, contact_ids=ids
+            )
+            confirmed = _confirm_on_import(connection, ids, list_name, confirm_reason)
         return {
             "dry_run": dry_run,
             "read": len(candidates),
             **_counts(counts),
+            **confirmed,
             "rejected_line_numbers": rejected_lines,
             "next": "Run: mailerlm contacts find" + (f" --list {list_name}" if list_name else ""),
         }
+
+    return _guard(work)
+
+
+def _confirm_needs_list(list_name: str | None, reason: str | None) -> None:
+    if reason is not None and not list_name:
+        raise MailerlmError("confirming needs a list: add --list <name>")
+
+
+def _confirm_on_import(
+    connection: sqlite3.Connection, ids: list[int], list_name: str | None, reason: str | None
+) -> Board:
+    """Confirm just-imported contacts on the list when the owner gave a reason; one who cannot be
+    confirmed (do-not-mail, unsubscribed, suppressed) is listed, and the import still stands."""
+    if reason is None or not list_name:
+        return {}
+    outcome = _confirm_many(connection, ids, repository.list_id(connection, list_name), reason)
+    return {
+        "confirmed": len(outcome["confirmed"]),
+        "already_subscribed": outcome["already_subscribed"],
+        "declined": outcome["declined"],
+    }
+
+
+def _who(connection: sqlite3.Connection, contact_id: int) -> dict:
+    email, name = connection.execute(
+        "SELECT email, name FROM contact WHERE id = ?", (contact_id,)
+    ).fetchone()
+    return {"contact": contact_id, "name": name, "email": mask_email(email)}
+
+
+def _confirm_many(
+    connection: sqlite3.Connection, ids: list[int], list_identifier: int, reason: str
+) -> dict:
+    confirmed, declined, already = [], [], 0
+    for contact_id in dict.fromkeys(ids):
+        try:
+            changes = consent_states.confirm_by_owner(
+                connection, contact_id, list_identifier, reason
+            )
+        except consent_states.NotConfirmable as error:
+            if "reason" in str(error):
+                raise MailerlmError(str(error)) from error
+            declined.append({**_who(connection, contact_id), "why": str(error)})
+            continue
+        if changes:
+            confirmed.append(_who(connection, contact_id))
+        else:
+            already += 1
+    return {"confirmed": confirmed, "declined": declined, "already_subscribed": already}
+
+
+def contacts_confirm(
+    contact: str | int, list_name: str, reason: str, dry_run: bool = False
+) -> Board:
+    """The owner confirms one person on one list without a confirmation letter (imported or pending
+    -> subscribed), with a required reason such as "known personally", "confirmed by email" or
+    "confirmed in person". Other lists are untouched. Never for someone marked do-not-mail,
+    unsubscribed or suppressed."""
+
+    def work() -> Board:
+        with _transaction(dry_run) as connection:
+            contact_id = repository.contact_by_ref(connection, contact)
+            try:
+                changes = consent_states.confirm_by_owner(
+                    connection, contact_id, repository.list_id(connection, list_name), reason
+                )
+            except consent_states.NotConfirmable as error:
+                raise MailerlmError(f"not confirmed: {error}") from error
+        board: Board = {"dry_run": dry_run, "list": list_name, "confirmed": bool(changes)}
+        if not changes:
+            board["note"] = "already subscribed on this list; nothing changed"
+        return {**board, "next": f"Run: mailerlm contacts history {contact}"}
+
+    return _guard(work)
+
+
+def lists_confirm(list_name: str, reason: str, dry_run: bool = False) -> Board:
+    """The owner confirms everyone on a list who is imported or pending, with one required reason.
+    `dry_run` shows who would change. People marked do-not-mail, unsubscribed or suppressed are
+    left as they are and listed with why; other lists are untouched."""
+
+    def work() -> Board:
+        with _transaction(dry_run) as connection:
+            list_identifier = repository.list_id(connection, list_name)
+            ids = [
+                row[0]
+                for row in connection.execute(
+                    "SELECT contact_id FROM membership WHERE list_id = ? ORDER BY contact_id",
+                    (list_identifier,),
+                )
+            ]
+            outcome = _confirm_many(connection, ids, list_identifier, reason)
+        changed = "would_confirm" if dry_run else "confirmed"
+        return {
+            "dry_run": dry_run,
+            "list": list_name,
+            "reason": " ".join(reason.split()),
+            changed: outcome["confirmed"],
+            "already_subscribed": outcome["already_subscribed"],
+            "declined": outcome["declined"],
+            "next": f"Run: mailerlm lists confirm {list_name} --reason ... (without --dry-run)"
+            if dry_run
+            else f"Run: mailerlm contacts find --list {list_name}",
+        }
+
+    return _guard(work)
+
+
+def contacts_history(contact: str | int) -> Board:
+    """Every consent change of this person's memberships, with how it happened (a confirmation
+    letter, their reply, the owner's word and reason, a request to stop)."""
+
+    def work() -> Board:
+        with _transaction() as connection:
+            contact_id = repository.contact_by_ref(connection, contact)
+            return {
+                **_who(connection, contact_id),
+                "history": repository.history(connection, contact_id),
+            }
 
     return _guard(work)
 

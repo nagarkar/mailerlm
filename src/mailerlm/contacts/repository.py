@@ -122,12 +122,16 @@ def import_candidates(
     list_name: str | None,
     tags: tuple[str, ...] = (),
     now: Clock = datetime.now,
+    contact_ids: list[int] | None = None,
 ) -> ImportCounts:
-    """Runs inside the caller's transaction, so everything is added or nothing is."""
+    """Runs inside the caller's transaction, so everything is added or nothing is. When
+    `contact_ids` is given, the id of every contact read is appended to it."""
     list_identifier = list_id(connection, list_name) if list_name else None
     counts = {"added": 0, "already_present": 0, "memberships_added": 0, "tags_added": 0}
     for candidate in candidates:
         contact_id, is_new = upsert_contact(connection, candidate, now)
+        if contact_ids is not None:
+            contact_ids.append(contact_id)
         counts["added" if is_new else "already_present"] += 1
         if list_identifier is not None and join_list(connection, contact_id, list_identifier, now):
             counts["memberships_added"] += 1
@@ -266,8 +270,8 @@ def find(
     out = []
     for contact_id, email, name, linkedin_url, do_not_mail in rows:
         memberships = connection.execute(
-            "SELECT l.name, m.status FROM membership m JOIN mailing_list l ON l.id = m.list_id "
-            "WHERE m.contact_id = ? ORDER BY l.name",
+            "SELECT l.name, m.status, m.confirmed_by, m.confirm_reason FROM membership m "
+            "JOIN mailing_list l ON l.id = m.list_id WHERE m.contact_id = ? ORDER BY l.name",
             (contact_id,),
         ).fetchall()
         tags = [
@@ -283,11 +287,32 @@ def find(
                 "name": name,
                 "linkedin_url": linkedin_url,
                 "do_not_mail": bool(do_not_mail),
-                "lists": {name_: status_ for name_, status_ in memberships},
+                "lists": {name_: status_ for name_, status_, _, _ in memberships},
+                "confirmed": {
+                    name_: _how_confirmed(by, reason)
+                    for name_, status_, by, reason in memberships
+                    if status_ == "subscribed" and by
+                },
                 "tags": tags,
             }
         )
     return out
+
+
+def _how_confirmed(by: str, reason: str | None) -> str:
+    return f"by owner: {reason}" if by == "owner" else "by reply"
+
+
+def history(connection: sqlite3.Connection, contact_id: int) -> list[dict]:
+    """Every status change of this contact's memberships, oldest first, with how it happened."""
+    return [
+        {"at": at, "list": list_name, "previous": previous, "new": new, "how": how}
+        for at, list_name, previous, new, how in connection.execute(
+            "SELECT at, list_name, previous, new, how FROM membership_event WHERE contact_id = ? "
+            "ORDER BY id",
+            (contact_id,),
+        )
+    ]
 
 
 def lists_summary(connection: sqlite3.Connection) -> list[dict]:
