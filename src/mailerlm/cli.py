@@ -89,11 +89,23 @@ def build_parser() -> clikit.Parser:
         "Create a list; a second add of the same name changes nothing.",
         "mailerlm lists add book-interest",
     )
+    lists_test = list_verbs.add_parser("test", help="mark a list as a test list")
+    lists_test.add_argument("name")
+    lists_test.add_argument(
+        "--clear", action="store_true", help="make it a real list again (no subject prefix)"
+    )
+    _mutating(lists_test)
+    lists_test.set_defaults(api="lists_test")
+    clikit.describe(
+        lists_test,
+        "Mark a list as a test list: every send whose lists are all test lists carries 'Testing: ' before its subject. The campaign's stored subject is not edited.",
+        "mailerlm lists test Testing",
+    )
     lists_show = list_verbs.add_parser("show", help="every list with its member counts by status")
     lists_show.set_defaults(api="lists_show")
     clikit.describe(
         lists_show,
-        "Show every list with its member counts by consent status.",
+        "Show every list with its member counts by consent status; a test list is marked [test list].",
         "mailerlm lists show",
     )
 
@@ -375,7 +387,10 @@ def format_board(board: dict, as_json: bool) -> str:
         elif key == "lists" and value and isinstance(value[0], dict):
             lines.append("lists:")
             for item in value:
-                lines.append(f"  {item['name']}: {item['members']} members {item['by_status']}")
+                mark = " [test list]" if item.get("test") else ""
+                lines.append(
+                    f"  {item['name']}: {item['members']} members {item['by_status']}{mark}"
+                )
         elif key == "contacts":
             lines.append("contacts:")
             for row in value:

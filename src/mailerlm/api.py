@@ -380,6 +380,23 @@ def lists_show() -> Board:
     }
 
 
+def lists_test(name: str, clear: bool = False, dry_run: bool = False) -> Board:
+    """Mark a list as a test list (`clear` makes it a real list again). Every send whose lists are
+    all test lists carries "Testing: " before its subject; the campaign's own subject is not edited."""
+
+    def work() -> Board:
+        with _transaction(dry_run) as connection:
+            repository.set_test_list(connection, name, not clear)
+        return {
+            "dry_run": dry_run,
+            "list": name,
+            "test": not clear,
+            "next": "Run: mailerlm lists show",
+        }
+
+    return _guard(work)
+
+
 def lists_edit(
     name: str, new_name: str, sender_name: str | None = None, sender_address: str | None = None
 ) -> Board:
@@ -926,9 +943,12 @@ def _render(
     def pick(field: str) -> str:
         return campaign[field] or defaults[field]
 
+    # A test list's mail says so in the subject; only the rendered letter changes, never the row.
+    campaign["test_list"] = audience.is_test(connection, tuple(campaign["lists"]))
+    subject = campaign["subject"]
     try:
         email = render.render(
-            subject=campaign["subject"],
+            subject=audience.test_subject(subject) if campaign["test_list"] else subject,
             body=campaign["body"],
             preview_text=campaign["preview_text"],
             frame_html=frame["html"],
@@ -966,6 +986,7 @@ def campaigns_check(name: str) -> Board:
             "campaign": name,
             "kind": campaign["kind"],
             "subject": email.subject,
+            "test_list": campaign["test_list"],
             "lists": campaign["lists"],
             "tags": campaign["tags"],
             "would_reach": len(reach.emails),
@@ -1175,6 +1196,7 @@ def sends_plan(name: str) -> Board:
             "campaign": name,
             "kind": plan["campaign"]["kind"],
             "subject": plan["email"].subject,
+            "test_list": plan["campaign"]["test_list"],
             "from": f"{who['sender_name']} <{who['sender_address']}>",
             "reply_to": who["reply_to"],
             "lists": plan["campaign"]["lists"],

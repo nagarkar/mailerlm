@@ -12,6 +12,11 @@ Decisions:
   of lists; the visual list editor edits memberships behind an Edit toggle. (owner)
 - Imported contacts arrive with membership status `imported`, which no campaign mails. (owner)
 - A list may override the sender name and address; the default sender comes from config. (owner)
+- A list can be marked as a test list (`mailing_list.is_test`, `mailerlm lists test <name>`, the
+  checkbox in the list's details). A send whose lists are all test lists carries "Testing: " before
+  its subject, added when the letter is rendered; the campaign's stored subject is never edited, so
+  the same campaign goes to its real list afterwards unchanged. A test list changes nothing else:
+  its members confirm like everyone else. (owner, 2026-11-25)
 
 - Boards show addresses masked (`a***@e***.com`); `--show-full-addresses` prints them, and is for
   the owner's own terminal. Why: an agent running a verb must not read the list. (owner)
@@ -23,6 +28,7 @@ Decisions:
 Terms:
 - **contact**: one person, identified by a normalized email address and optionally a LinkedIn profile URL.
 - **list**: a named audience a campaign is sent to; a contact may be on several.
+- **test list**: a list marked for trying a letter out; mail to it says "Testing: " before the subject.
 - **membership**: a contact's place on one list, with its consent status.
 - **tag**: a free label on a contact, such as `early-access`, used to narrow a campaign's audience.
 """

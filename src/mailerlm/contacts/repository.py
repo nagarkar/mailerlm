@@ -198,6 +198,13 @@ def rename_list(
         raise ContactsError(f"a list named '{new_name}' already exists") from error
 
 
+def set_test_list(connection: sqlite3.Connection, name: str, value: bool) -> None:
+    """Mark a list as a test list, or as a real one again."""
+    connection.execute(
+        "UPDATE mailing_list SET is_test = ? WHERE id = ?", (int(value), list_id(connection, name))
+    )
+
+
 def delete_list(connection: sqlite3.Connection, name: str) -> None:
     connection.execute("DELETE FROM mailing_list WHERE id = ?", (list_id(connection, name),))
 
@@ -277,12 +284,12 @@ def find(
 
 def lists_summary(connection: sqlite3.Connection) -> list[dict]:
     rows = connection.execute(
-        "SELECT l.name, l.sender_name, l.sender_address, "
+        "SELECT l.name, l.sender_name, l.sender_address, l.is_test, "
         "(SELECT COUNT(*) FROM membership m WHERE m.list_id = l.id) FROM mailing_list l "
         "ORDER BY l.name"
     ).fetchall()
     out = []
-    for name, sender_name, sender_address, members in rows:
+    for name, sender_name, sender_address, is_test, members in rows:
         by_status = dict(
             connection.execute(
                 "SELECT m.status, COUNT(*) FROM membership m JOIN mailing_list l ON l.id = m.list_id "
@@ -293,6 +300,7 @@ def lists_summary(connection: sqlite3.Connection) -> list[dict]:
         out.append(
             {
                 "name": name,
+                "test": bool(is_test),
                 "members": members,
                 "by_status": by_status,
                 "sender_name": sender_name or "",

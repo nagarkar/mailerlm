@@ -50,4 +50,5 @@ Rules that span modules, from each package's `Decisions:`. Owner rules end with 
 
 ## Agent-drafted
 
+- `mailerlm.contacts`: A list can be marked as a test list (`mailing_list.is_test`, `mailerlm lists test <name>`, the checkbox in the list's details). A send whose lists are all test lists carries "Testing: " before its subject, added when the letter is rendered; the campaign's stored subject is never edited, so the same campaign goes to its real list afterwards unchanged. A test list changes nothing else: its members confirm like everyone else. (owner, 2026-11-25)
 - `mailerlm.editor`: One edit of a template runs at a time. The model call holds no database lock.

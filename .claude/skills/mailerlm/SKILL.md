@@ -11,6 +11,7 @@ Verbs today (more arrive with the implementation issues; each prints a board, `-
 - `mailerlm doctor`: checks the environment; exits 1 when a required check fails.
 - `mailerlm gmail connect`: owner's act; opens a browser for readonly consent and stores the token.
 - `mailerlm lists add <name> [--sender-name N --sender-address A] [--dry-run]`, `mailerlm lists show`: lists and their member counts by status.
+- `mailerlm lists test <name> [--clear] [--dry-run]`: marks a list as a test list (`lists show` prints `[test list]`). Every send whose lists are all test lists carries `Testing: ` before its subject, added at render time; the campaign's stored subject is never edited. A test list changes nothing about consent or about who may send.
 - `mailerlm contacts import <file|-> [--list L] [--tag T] [--dry-run]`: pasted text ('Name: email', 'Name <email>', LinkedIn URLs) or a CSV with an email header; re-import adds nothing.
 - `mailerlm contacts add --email E [--name N] [--linkedin-url U] [--list L]`: one contact.
 - `mailerlm contacts tag <email> <tag>` and `mailerlm contacts untag <email> <tag>`.

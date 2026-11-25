@@ -198,7 +198,7 @@ async function listsPage() {
     h("section", { class: "panel" }, h("h2", {}, "New list"),
       field("Name", name), h("div", { class: "row", style: "margin-top:10px" }, h("button", { class: "primary", on: { click: add } }, "Create list"))),
     lists.length ? h("div", { class: "grid" }, lists.map((list) => card(`#/lists/${enc(list.name)}`, list.name,
-      `${plural(list.members, "member")} · ` + (Object.entries(list.by_status).map(([s, n]) => `${n} ${s}`).join(", ") || "empty")))) : h("p", { class: "empty" }, "No lists yet."));
+      (list.test ? "Test list · " : "") + `${plural(list.members, "member")} · ` + (Object.entries(list.by_status).map(([s, n]) => `${n} ${s}`).join(", ") || "empty")))) : h("p", { class: "empty" }, "No lists yet."));
 }
 
 async function listPage(name) {
@@ -209,20 +209,25 @@ async function listPage(name) {
   const allLists = lists.map((item) => item.name);
   const view = h("div", {},
     h("p", {}, h("span", { class: "small" }, "Members: "), `${list.members} (${Object.entries(list.by_status).map(([s, n]) => `${n} ${s}`).join(", ") || "none"})`),
-    h("p", {}, h("span", { class: "small" }, "Sender override: "), list.sender_override ? `${list.sender_name} ${list.sender_address}` : "none (uses Settings)"));
+    h("p", {}, h("span", { class: "small" }, "Sender override: "), list.sender_override ? `${list.sender_name} ${list.sender_address}` : "none (uses Settings)"),
+    h("p", {}, h("span", { class: "small" }, "Test list: "), list.test ? "yes: every letter sent to it says “Testing: ” before the subject" : "no"));
   const form = (done) => {
     const newName = text(list.name), senderName = text(list.sender_name), senderAddress = text(list.sender_address);
+    const isTest = h("input", { type: "checkbox", checked: list.test });
     return h("div", {}, field("Name", newName), field("Sender name (optional override)", senderName), field("Sender address (optional override)", senderAddress),
+      h("label", { style: "display:flex;gap:8px;align-items:center" }, isTest, "Test list (letters sent to it say “Testing: ” before the subject)"),
       formButtons(async () => {
+        // The flag is saved first, under the old name; the rename follows.
+        if (isTest.checked !== list.test && !(await attempt(() => api("lists_test", { name: list.name, clear: !isTest.checked })))) return;
         if (await attempt(() => api("lists_edit", { name: list.name, new_name: newName.value, sender_name: senderName.value, sender_address: senderAddress.value }), "Saved")) {
-          location.hash = `#/lists/${enc(newName.value.trim())}`;
+          if (newName.value.trim() === list.name) done(true); else location.hash = `#/lists/${enc(newName.value.trim())}`;
         }
       }, () => done(false)),
       h("div", { style: "margin-top:12px" }, inlineConfirm("Delete this list", async () => {
         if (await attempt(() => api("lists_delete", { name: list.name }), "List deleted")) location.hash = "#/lists";
       }, "Delete the list (people stay on your other lists)")));
   };
-  return h("div", {}, h("p", {}, h("a", { href: "#/lists" }, "← All lists")), h("h1", {}, list.name),
+  return h("div", {}, h("p", {}, h("a", { href: "#/lists" }, "← All lists")), h("h1", {}, list.name, list.test ? h("span", { class: "chip imported", style: "margin-left:10px;vertical-align:middle" }, "test list") : null),
     editable("List details", view, form, refresh),
     importPanel(name),
     h("section", { class: "panel" }, h("header", {}, h("h2", {}, `People on this list (${people.count})`)),
@@ -584,7 +589,7 @@ function sendPanel(campaign) {
     go.append(arm);
     review.replaceChildren(
       h("div", { class: "notice" }, h("div", {}, h("strong", {}, "From: "), out.from, " · replies to ", out.reply_to), h("div", {}, h("strong", {}, "Subject: "), out.subject),
-        h("div", {}, h("strong", {}, "List: "), out.lists.length ? out.lists.join(", ") : "none chosen", out.tags.length ? ` (only people tagged ${out.tags.join(", ")})` : ""),
+        h("div", {}, h("strong", {}, "List: "), out.lists.length ? out.lists.join(", ") : "none chosen", out.test_list ? " (test list: the subject says “Testing: ”)" : "", out.tags.length ? ` (only people tagged ${out.tags.join(", ")})` : ""),
         h("div", {}, h("strong", {}, "Reaches: "), plural(out.recipients, "person", "people"), Object.keys(out.skipped).length ? " (not reached: " + Object.entries(out.skipped).map(([why, n]) => `${n} ${why}`).join(", ") + ")" : ""),
         h("div", { class: "small" }, `Review code ${out.fingerprint}: the send stops if the letter or audience changes after this.`)),
       ...(out.blockers.length ? [h("div", { class: "notice bad" }, out.blockers.map((b) => h("div", {}, "• " + b)))] : []),
