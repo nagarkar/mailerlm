@@ -945,12 +945,34 @@ def campaigns_image_data(name: str, filename: str) -> tuple[bytes, str] | None:
     return data, mime
 
 
+def _list_look(
+    connection: sqlite3.Connection, campaign: dict, list_name: str | None
+) -> audience.ListSettings:
+    """The settings of `list_name`, else of the campaign's first list, else a plain real list."""
+    name = list_name or (campaign["lists"][0] if campaign["lists"] else None)
+    if name is None:
+        return audience.ListSettings("", False, True)
+    try:
+        return audience.list_settings(connection, name)
+    except NotFoundError:
+        if list_name is None:
+            raise
+        return audience.ListSettings(list_name, False, True)  # a deleted list of an old send
+
+
 def _render(
-    connection: sqlite3.Connection, name: str, first_name: str, draft: dict | None = None
+    connection: sqlite3.Connection,
+    name: str,
+    first_name: str,
+    draft: dict | None = None,
+    list_name: str | None = None,
+    test_prefix: bool | None = None,
+    show_footer: bool | None = None,
 ) -> tuple[dict, render.RenderedEmail]:
-    """Render the saved campaign; `draft` fields (and `frame_html`/`frame_text`) overlay it unsaved."""
+    """Render the saved campaign as a reader reached through `list_name` gets it (default: the
+    campaign's first list); `test_prefix` and `show_footer` override that list's settings for one
+    person (see `audience.per_list`). `draft` fields (and `frame_html`/`frame_text`) overlay it unsaved."""
     campaign = campaigns_repository.campaign_get(connection, name)
-    defaults = campaigns_repository.settings_get(connection)
     frame = campaigns_repository.template_get(connection, campaign["template"])
     draft = draft or {}
     if "frame_html" in draft:
@@ -971,27 +993,26 @@ def _render(
     if isinstance(draft.get("variables"), dict):
         campaign["variables"] = {str(k): str(v) for k, v in draft["variables"].items()}
     settings = config.load(paths.config_path())
-
-    def pick(field: str) -> str:
-        return campaign[field] or defaults[field]
-
-    # A test list's mail says so in the subject; only the rendered letter changes, never the row.
-    campaign["test_list"] = audience.is_test(connection, tuple(campaign["lists"]))
-    campaign["footer_hidden"] = audience.footer_hidden(connection, tuple(campaign["lists"]))
+    look = _list_look(connection, campaign, list_name)
+    who = _effective_sender(connection, campaign, look)
+    prefix = look.is_test if test_prefix is None else test_prefix
+    footer = look.show_footer if show_footer is None else show_footer
+    # Only the rendered letter changes, never the campaign row.
+    campaign["look"] = {"list": look.name, "test_prefix": prefix, "show_footer": footer}
     subject = campaign["subject"]
     try:
         email = render.render(
-            subject=audience.test_subject(subject) if campaign["test_list"] else subject,
+            subject=audience.test_subject(subject) if prefix else subject,
             body=campaign["body"],
             preview_text=campaign["preview_text"],
             frame_html=frame["html"],
             frame_text=frame["text"],
             variables=campaign["variables"],
-            sender_name=pick("sender_name"),
-            postal_address=pick("postal_address"),
-            reply_to=pick("reply_to"),
-            unsubscribe_line=pick("unsubscribe_line"),
-            show_footer=not campaign["footer_hidden"],
+            sender_name=who["sender_name"],
+            postal_address=who["postal_address"],
+            reply_to=who["reply_to"],
+            unsubscribe_line=who["unsubscribe_line"],
+            show_footer=footer,
             resolve_image=lambda image_name: campaigns_repository.image_bytes(
                 connection, name, image_name
             ),
@@ -1004,29 +1025,28 @@ def _render(
 
 
 def campaigns_check(name: str) -> Board:
-    """Render the campaign and count who it would reach; sends nothing."""
+    """Render the campaign for each of its lists and count who it would reach; sends nothing."""
 
     def work() -> Board:
         with _transaction() as connection:
-            campaign, email = _render(connection, name, "there")
-            reach = audience.resolve(
-                connection, tuple(campaign["lists"]), tuple(campaign["tags"]), campaign["kind"]
-            )
-        problems = list(email.warnings)
+            plan = _prepare(connection, name, None)
+        campaign, email = plan["campaign"], plan["email"]
+        problems = list(plan["render_problems"]) + plan["overlaps"]
         if not campaign["lists"]:
             problems.append("the campaign names no list")
         if not campaign["subject"].strip():
             problems.append("the campaign has no subject")
+        problems = sorted(set(problems))
         return {
             "campaign": name,
             "kind": campaign["kind"],
             "subject": email.subject,
-            "test_list": campaign["test_list"],
-            "footer": _footer(campaign),
             "lists": campaign["lists"],
             "tags": campaign["tags"],
-            "would_reach": len(reach.emails),
-            "skipped": reach.skipped_by_reason,
+            "would_reach": len(plan["reach"].recipients),
+            "skipped": plan["reach"].skipped_by_reason,
+            "by_list": plan["by_list"],
+            "notes": plan["notes"],
             "inline_images": len(email.images),
             "inline_image_kilobytes": round(sum(len(i.data) for i in email.images) / 1024, 1),
             "track_clicks": campaign["track_clicks"],
@@ -1040,20 +1060,27 @@ def campaigns_check(name: str) -> Board:
 
 
 def campaigns_preview(
-    name: str, first_name: str = "Friend", write_files: bool = True, draft: dict | None = None
+    name: str,
+    first_name: str = "Friend",
+    write_files: bool = True,
+    draft: dict | None = None,
+    list_name: str | None = None,
 ) -> Board:
-    """The rendered email (images inline as data addresses). From the command line it is also
-    written under the workspace's previews folder to open in a browser."""
+    """The rendered email (images inline as data addresses) as a reader reached through `list_name`
+    gets it (default: the campaign's first list). From the command line it is also written under the
+    workspace's previews folder to open in a browser."""
 
     def work() -> Board:
         with _transaction() as connection:
-            _, email = _render(connection, name, first_name, draft)
+            campaign, email = _render(connection, name, first_name, draft, list_name)
         page = email.html
         for image in email.images:
             uri = f"data:{image.mime};base64,{base64.b64encode(image.data).decode()}"
             page = page.replace(f"cid:{image.content_id}", uri)
         board: Board = {
             "campaign": name,
+            "as_reached_through": campaign["look"]["list"] or "no list",
+            "footer": "shown" if campaign["look"]["show_footer"] else "hidden",
             "subject": email.subject,
             "html": page,
             "text": email.text,
@@ -1117,25 +1144,30 @@ def _pause(sender: MailSender) -> float:
     return resend.SECONDS_BETWEEN_MESSAGES if sender.name == "resend" else 0.0
 
 
-def _effective_sender(connection: sqlite3.Connection, campaign: dict) -> dict[str, str]:
-    """The campaign's own sender fields, else the one list's override, else the Settings defaults."""
+def _effective_sender(
+    connection: sqlite3.Connection, campaign: dict, look: audience.ListSettings
+) -> dict[str, str]:
+    """The campaign's own sender fields, else the list's override (name and address), else the
+    Settings defaults."""
     defaults = campaigns_repository.settings_get(connection)
-    list_override = {"sender_name": "", "sender_address": ""}
-    if len(campaign["lists"]) == 1:
-        row = connection.execute(
-            "SELECT sender_name, sender_address FROM mailing_list WHERE name = ?",
-            (campaign["lists"][0],),
-        ).fetchone()
-        if row:
-            list_override = {"sender_name": row[0] or "", "sender_address": row[1] or ""}
-    return {key: campaign[key] or list_override.get(key, "") or defaults[key] for key in defaults}
+    override = {"sender_name": look.sender_name, "sender_address": look.sender_address}
+    return {key: campaign[key] or override.get(key, "") or defaults[key] for key in defaults}
 
 
 def _message(
     connection: sqlite3.Connection, name: str, recipient: sending.Recipient, key: str
 ) -> OutgoingMessage:
-    campaign, email = _render(connection, name, recipient.first_name)
-    who = _effective_sender(connection, campaign)
+    campaign, email = _render(
+        connection,
+        name,
+        recipient.first_name,
+        list_name=recipient.list_name,
+        test_prefix=recipient.test_prefix,
+        show_footer=recipient.show_footer,
+    )
+    who = _effective_sender(
+        connection, campaign, _list_look(connection, campaign, recipient.list_name)
+    )
     return OutgoingMessage(
         sender_name=who["sender_name"],
         sender_address=who["sender_address"],
@@ -1153,24 +1185,50 @@ def _message(
     )
 
 
-def _prepare(connection: sqlite3.Connection, name: str) -> dict:
-    campaign, email = _render(connection, name, "Friend")
-    who = _effective_sender(connection, campaign)
-    reach = audience.resolve(
-        connection, tuple(campaign["lists"]), tuple(campaign["tags"]), campaign["kind"]
+def _prepare(connection: sqlite3.Connection, name: str, lists: list[str] | None = None) -> dict:
+    """Plan a send to `lists` (default: the campaign's lists), in that order: who each list reaches,
+    one letter per person in the look of the list they are reached through, and a fingerprint of
+    the lists, the letters and the audience."""
+    campaign = campaigns_repository.campaign_get(connection, name)
+    chosen = tuple(dict.fromkeys(lists)) if lists else tuple(campaign["lists"])
+    reach = audience.per_list(connection, chosen, tuple(campaign["tags"]), campaign["kind"])
+    looks = {(r.list_name, r.test_prefix, r.show_footer) for r in reach.recipients}
+    looks |= {(x.settings.name, x.settings.is_test, x.settings.show_footer) for x in reach.lists}
+    renders: dict[tuple, render.RenderedEmail] = {}
+    for look in sorted(looks):
+        campaign, renders[look] = _render(connection, name, "Friend", None, *look)
+    first = reach.lists[0].settings if reach.lists else None
+    first_look = (first.name, first.is_test, first.show_footer) if first else None
+    if first_look is None:
+        campaign, email = _render(connection, name, "Friend")
+    else:
+        email = renders[first_look]
+    senders = {
+        x.settings.name: _effective_sender(connection, campaign, x.settings) for x in reach.lists
+    }
+    who = (
+        senders[first.name]
+        if first
+        else _effective_sender(connection, campaign, audience.ListSettings("", False, True))
     )
-    problems = list(email.warnings)
-    for key, label in (
+    render_problems = sorted(
+        {w for e in renders.values() for w in e.warnings} | set(email.warnings)
+    )
+    problems = list(render_problems)
+    labels = (
         ("sender_name", "sender name"),
         ("sender_address", "sender address"),
         ("reply_to", "reply-to address"),
         ("postal_address", "postal address"),
-    ):
-        if key == "postal_address" and campaign["footer_hidden"]:
-            continue
-        if not who[key]:
-            problems.append(f"no {label} set (Settings, or this campaign's Sender section)")
-    if not campaign["lists"]:
+    )
+    footer_somewhere = any(f for (_, _, f) in looks) or not reach.lists
+    for each in senders.values() or [who]:
+        for key, label in labels:
+            if key == "postal_address" and not footer_somewhere:
+                continue
+            if not each[key]:
+                problems.append(f"no {label} set (Settings, or this campaign's Sender section)")
+    if not chosen:
         problems.append("the campaign names no list")
     if not campaign["subject"].strip():
         problems.append("the campaign has no subject")
@@ -1181,15 +1239,35 @@ def _prepare(connection: sqlite3.Connection, name: str) -> dict:
             "tracking is set per sending domain in Resend, not per campaign; the flags here are only notes"
         )
     problems = sorted(set(problems))
+    overlaps = [_overlap_text(o, mailed=True) for o in reach.blocking]
+    problems += overlaps
+    by_list = [
+        {
+            "list": x.settings.name,
+            "recipients": x.recipients,
+            "footer": "shown" if x.settings.show_footer else "hidden",
+            "testing_prefix": x.settings.is_test,
+            "subject": renders[
+                (x.settings.name, x.settings.is_test, x.settings.show_footer)
+            ].subject,
+            "from": f"{senders[x.settings.name]['sender_name']} <{senders[x.settings.name]['sender_address']}>",
+            "skipped": x.skipped_by_reason,
+        }
+        for x in reach.lists
+    ]
     fingerprint = hashlib.sha256(
         json.dumps(
             {
-                "subject": email.subject,
-                "html": email.html,
-                "text": email.text,
-                "sender": who,
+                "lists": list(chosen),
+                "letters": {
+                    "|".join(map(str, look)): [e.subject, e.html, e.text]
+                    for look, e in renders.items()
+                },
+                "senders": senders,
                 "kind": campaign["kind"],
-                "recipients": list(reach.emails),
+                "recipients": [
+                    [r.email, r.list_name, r.test_prefix, r.show_footer] for r in reach.recipients
+                ],
                 "images": [hashlib.sha256(i.data).hexdigest() for i in email.images],
             },
             sort_keys=True,
@@ -1197,36 +1275,56 @@ def _prepare(connection: sqlite3.Connection, name: str) -> dict:
     ).hexdigest()[:16]
     return {
         "campaign": campaign,
+        "lists": list(chosen),
         "email": email,
+        "renders": renders,
         "sender": who,
         "reach": reach,
+        "by_list": by_list,
+        "overlaps": overlaps,
+        "notes": [_overlap_text(o, mailed=False) for o in reach.notes],
+        "render_problems": render_problems,
         "problems": problems,
         "fingerprint": fingerprint,
     }
 
 
-def _footer(campaign: dict) -> str:
-    return "hidden: every list is set to hide it" if campaign["footer_hidden"] else "shown"
+def _overlap_text(overlap: audience.Overlap, mailed: bool) -> str:
+    """One overlap in words, with the owner's two fixes."""
+    on = ", ".join(f"{name} ({status})" for name, status in overlap.on.items())
+    who = f"{mask_email(overlap.email)} (contact {overlap.contact_id})"
+    leave = next(iter(overlap.on))
+    if mailed:
+        return (
+            f"{who} would be mailed through more than one chosen list: {on}. Take them off all but "
+            f"one (mailerlm contacts leave {overlap.contact_id} {leave}, or the list's page) or "
+            "drop a list from this send"
+        )
+    return (
+        f"{who} is on more than one chosen list: {on}; only one would mail them now. To tidy it "
+        f"early: mailerlm contacts leave {overlap.contact_id} {leave}, or the list's page"
+    )
 
 
-def sends_plan(name: str) -> Board:
-    """What a real send would do right now, with the fingerprint that `sends_start` must repeat."""
+def sends_plan(name: str, lists: list[str] | None = None) -> Board:
+    """What a real send to `lists` (default: the campaign's lists, in order) would do right now, per
+    list, with the fingerprint that `sends_start` must repeat with the same lists."""
 
     def work() -> Board:
         settings = config.load(paths.config_path())
         with _transaction() as connection:
-            plan = _prepare(connection, name)
+            plan = _prepare(connection, name, lists)
             today = sending.live_sends_today(connection)
             repeated = sending.already_sent(connection, name, plan["fingerprint"])
         reach, who = plan["reach"], plan["sender"]
         blockers = [p for p in plan["problems"] if not p.startswith("tracking is set")]
         max_recipients = settings.get("caps", "max_recipients_per_send")
         max_sends = settings.get("caps", "max_sends_per_day")
-        if not reach.emails:
+        if not reach.recipients:
             blockers.append("nobody would receive it")
-        if len(reach.emails) > max_recipients:
+        if len(reach.recipients) > max_recipients:
             blockers.append(
-                f"{len(reach.emails)} recipients is over the cap of {max_recipients} (caps.max_recipients_per_send)"
+                f"{len(reach.recipients)} recipients is over the cap of {max_recipients} (caps.max_recipients_per_send)"
             )
         if today >= max_sends:
             blockers.append(
@@ -1234,23 +1332,25 @@ def sends_plan(name: str) -> Board:
             )
         if repeated:
             blockers.append("this exact letter was already sent to this exact audience")
+        chosen = " ".join(f"--list {json.dumps(n) if ' ' in n else n}" for n in plan["lists"])
         return {
             "campaign": name,
             "kind": plan["campaign"]["kind"],
             "subject": plan["email"].subject,
-            "test_list": plan["campaign"]["test_list"],
-            "footer": _footer(plan["campaign"]),
             "from": f"{who['sender_name']} <{who['sender_address']}>",
             "reply_to": who["reply_to"],
-            "lists": plan["campaign"]["lists"],
+            "lists": plan["lists"],
+            "campaign_lists": plan["campaign"]["lists"],
             "tags": plan["campaign"]["tags"],
-            "recipients": len(reach.emails),
+            "recipients": len(reach.recipients),
             "skipped": reach.skipped_by_reason,
+            "by_list": plan["by_list"],
+            "notes": plan["notes"],
             "fingerprint": plan["fingerprint"],
             "problems": plan["problems"],
             "blockers": blockers,
             "can_send": not blockers,
-            "next": f"Run: mailerlm sends start {name} --fingerprint {plan['fingerprint']}"
+            "next": f"Run: mailerlm sends start {name} {chosen} --fingerprint {plan['fingerprint']}"
             if not blockers
             else "Fix the blockers above, then plan again",
         }
@@ -1280,7 +1380,16 @@ def _execute(send_id: int, name: str, kind: str) -> dict[str, int]:
                         (send_id,),
                     )
                 ]
-                list_ids = [repository.list_id(connection, n) for n in campaign["lists"]]
+                chosen = sending.send_lists(connection, send_id) or tuple(campaign["lists"])
+                list_ids = [
+                    row[0]
+                    for n in chosen
+                    if (
+                        row := connection.execute(
+                            "SELECT id FROM mailing_list WHERE name = ?", (n,)
+                        ).fetchone()
+                    )
+                ]
                 consent_states.mark_pending(connection, sent, list_ids)
         return result
     finally:
@@ -1288,13 +1397,14 @@ def _execute(send_id: int, name: str, kind: str) -> dict[str, int]:
         connection.close()
 
 
-def sends_test(name: str) -> Board:
-    """Send this campaign once, to the reply-to address (your own inbox); nobody else is mailed."""
+def sends_test(name: str, lists: list[str] | None = None) -> Board:
+    """Send this campaign once, to the reply-to address (your own inbox), as a reader of the first
+    of `lists` (default: the campaign's first list) gets it; nobody else is mailed."""
 
     def work() -> Board:
         sender = _sender()
         with _transaction() as connection:
-            plan = _prepare(connection, name)
+            plan = _prepare(connection, name, lists)
             blockers = [
                 p
                 for p in plan["problems"]
@@ -1303,19 +1413,31 @@ def sends_test(name: str) -> Board:
             if blockers:
                 raise MailerlmError("cannot send yet: " + "; ".join(blockers))
             target = plan["sender"]["reply_to"]
+            first = plan["reach"].lists[0].settings if plan["reach"].lists else None
             send_id = sending.create_send(
                 connection,
                 name,
                 "test",
                 plan["email"].subject,
                 plan["fingerprint"],
-                [sending.Recipient(None, target, "there")],
+                [
+                    sending.Recipient(
+                        None,
+                        target,
+                        "there",
+                        first.name if first else None,
+                        first.show_footer if first else None,
+                        first.is_test if first else None,
+                    )
+                ],
                 excerpt=plan["email"].text,
+                lists=tuple(plan["lists"]),
             )
         result = _execute(send_id, name, "test")
         return {
             "send": send_id,
             "sent_to": "your reply-to address",
+            "as_reached_through": first.name if first else "no list",
             "counts": result,
             "sender": sender.name,
             "next": "Check your inbox, then run: mailerlm sends poll",
@@ -1324,21 +1446,28 @@ def sends_test(name: str) -> Board:
     return _guard(work)
 
 
-def sends_start(name: str, fingerprint: str, background: bool = False) -> Board:
-    """The real send. It repeats the plan and refuses unless the fingerprint still matches."""
-    plan_board = sends_plan(name)
+def sends_start(
+    name: str, fingerprint: str, lists: list[str] | None = None, background: bool = False
+) -> Board:
+    """The real send to `lists` (default: the campaign's lists). It repeats the plan for the same
+    lists and stops unless the fingerprint still matches."""
+    plan_board = sends_plan(name, lists)
     if plan_board["fingerprint"] != fingerprint:
-        raise MailerlmError("the letter or the audience changed since you reviewed it. Plan again")
+        raise MailerlmError(
+            "the letter, the lists or the audience changed since you reviewed it. Plan again"
+        )
     if not plan_board["can_send"]:
         raise MailerlmError("cannot send: " + "; ".join(plan_board["blockers"]))
 
     def work() -> Board:
         _sender()  # fail before anything is recorded when the key is missing
         with _transaction() as connection:
-            plan = _prepare(connection, name)
+            plan = _prepare(connection, name, lists)
             recipients = [
-                sending.Recipient(i, e, "there")
-                for i, e in zip(plan["reach"].contact_ids, plan["reach"].emails, strict=True)
+                sending.Recipient(
+                    r.contact_id, r.email, "there", r.list_name, r.show_footer, r.test_prefix
+                )
+                for r in plan["reach"].recipients
             ]
             send_id = sending.create_send(
                 connection,
@@ -1348,6 +1477,7 @@ def sends_start(name: str, fingerprint: str, background: bool = False) -> Board:
                 plan["fingerprint"],
                 recipients,
                 excerpt=plan["email"].text,
+                lists=tuple(plan["lists"]),
             )
             kind = "live"
         if background:

@@ -23,6 +23,7 @@ Decisions:
 - Tracking is a setting of the sending domain in Resend; the campaign flags are notes. (owner)
 
 Terms:
-- **send**: one campaign delivered (or tested) to one audience, with a row per recipient.
+- **send**: one campaign delivered (or tested) to the lists chosen for it, with a row per recipient that records
+  the list they were reached through.
 - **fingerprint**: a short code of the exact letter, sender and audience a plan showed.
 """

@@ -1,4 +1,4 @@
-"""test lists: the flag on a list, and the "Testing: " subject on every send whose audience is one."""
+"""test lists: the flag on a list, and the "Testing: " subject for every reader reached through one."""
 
 import sqlite3
 
@@ -63,7 +63,7 @@ def test_the_listing_shows_the_flag(world):
 def test_a_send_to_a_test_list_carries_the_prefix_and_the_stored_subject_stays(world):
     api.campaigns_save("c", {"lists": ["Testing"]})
     plan = api.sends_plan("c")
-    assert plan["subject"] == "Testing: News on The Book" and plan["test_list"] is True
+    assert plan["subject"] == "Testing: News on The Book" and plan["by_list"][0]["testing_prefix"]
     assert api.campaigns_check("c")["subject"] == "Testing: News on The Book"
     assert api.campaigns_preview("c", write_files=False)["subject"] == "Testing: News on The Book"
     board = api.sends_start("c", plan["fingerprint"])
@@ -83,14 +83,20 @@ def test_a_test_send_of_a_test_list_campaign_carries_the_prefix_too(world):
 def test_a_send_to_a_real_list_has_no_prefix(world):
     api.campaigns_save("c", {"lists": ["book-interest"]})
     plan = api.sends_plan("c")
-    assert plan["subject"] == "News on The Book" and plan["test_list"] is False
+    assert plan["subject"] == "News on The Book" and not plan["by_list"][0]["testing_prefix"]
     api.sends_start("c", plan["fingerprint"])
     assert world.sent[0].subject == "News on The Book"
 
 
-def test_a_campaign_that_also_names_a_real_list_has_no_prefix(world):
-    api.campaigns_save("c", {"lists": ["Testing", "book-interest"]})
-    assert api.sends_plan("c")["subject"] == "News on The Book"
+def test_in_a_send_to_a_test_list_and_a_real_one_only_the_test_readers_see_the_prefix(world):
+    plan = api.sends_plan("c", lists=["Testing", "book-interest"])
+    subjects = {row["list"]: row["subject"] for row in plan["by_list"]}
+    assert subjects == {"Testing": "Testing: News on The Book", "book-interest": "News on The Book"}
+    api.sends_start("c", plan["fingerprint"], lists=["Testing", "book-interest"])
+    assert {(m.to, m.subject) for m in world.sent} == {
+        ("ada@example.com", "Testing: News on The Book"),
+        ("grace@example.com", "News on The Book"),
+    }
 
 
 def test_the_same_campaign_moves_from_the_test_list_to_the_real_one(world):

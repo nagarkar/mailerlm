@@ -3,8 +3,12 @@
 Example rows:
   send:     (1, 1, 'october-update', 'live', 'done', 'An update on The Book', 'a3f9...', 10,
              '2026-10-11T15:00:00', '2026-10-11T15:00:02', '2026-10-11T15:00:09')
-  delivery: (1, 1, 7, 'ada@example.com', 'delivered', 're_123...', NULL, '2026-10-11T15:01:00')
-A deleted campaign leaves its sends (campaign_id becomes NULL, campaign_name stays).
+           ... excerpt, lists = '["friends", "book-interest"]' (the lists chosen for it, in order)
+  delivery: (1, 1, 7, 'ada@example.com', 'delivered', 're_123...', NULL, '2026-10-11T15:01:00',
+             3, 'friends', 1, 0)   -- reached through list 3 'friends', footer shown, no "Testing: "
+A deleted campaign leaves its sends (campaign_id becomes NULL, campaign_name stays); a deleted list
+leaves its deliveries (list_id becomes NULL, list_name stays). Rows from before per-list sends have
+NULL list columns and `lists = '[]'`.
 """
 
 MIGRATION = """
@@ -38,3 +42,13 @@ CREATE TABLE delivery (
 
 # What the letter said, kept so a reply can be read in its thread (the first recipient's plain text, trimmed).
 EXCERPT_MIGRATION = "ALTER TABLE send ADD COLUMN excerpt TEXT NOT NULL DEFAULT ''"
+
+# Per-list sends: the lists a send was planned for, and per delivery the list the person was reached
+# through and how their letter looked (so a resumed send renders it the same way).
+LIST_MIGRATION = """
+ALTER TABLE send ADD COLUMN lists TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE delivery ADD COLUMN list_id INTEGER REFERENCES mailing_list(id) ON DELETE SET NULL;
+ALTER TABLE delivery ADD COLUMN list_name TEXT;
+ALTER TABLE delivery ADD COLUMN show_footer INTEGER CHECK (show_footer IN (0, 1));
+ALTER TABLE delivery ADD COLUMN test_prefix INTEGER CHECK (test_prefix IN (0, 1))
+"""
