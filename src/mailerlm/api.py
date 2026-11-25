@@ -578,9 +578,14 @@ def settings_get() -> Board:
 
 
 def settings_save(
-    sender_name: str = "", sender_address: str = "", reply_to: str = "", postal_address: str = ""
+    sender_name: str = "",
+    sender_address: str = "",
+    reply_to: str = "",
+    postal_address: str = "",
+    unsubscribe_line: str = "",
 ) -> Board:
-    """The defaults every campaign uses unless it sets its own."""
+    """The defaults every campaign uses unless it sets its own. An empty `unsubscribe_line`
+    (the footer's opt-out line) means the built-in wording."""
 
     def work() -> Board:
         with _transaction() as connection:
@@ -591,6 +596,7 @@ def settings_save(
                     "sender_address": sender_address,
                     "reply_to": reply_to,
                     "postal_address": postal_address,
+                    "unsubscribe_line": unsubscribe_line,
                 },
             )
         return {"saved": True, "next": "Run: mailerlm doctor"}
@@ -754,6 +760,7 @@ def templates_preview(html: str, text: str) -> Board:
                 sender_name=defaults["sender_name"] or "Your Name",
                 postal_address=defaults["postal_address"],
                 reply_to=defaults["reply_to"],
+                unsubscribe_line=defaults["unsubscribe_line"],
                 resolve_image=lambda _name: None,
                 image_budget_bytes=0,
                 first_name="Friend",
@@ -860,8 +867,8 @@ def campaigns_create(name: str, starter: str = "update", dry_run: bool = False) 
 
 def campaigns_save(name: str, fields: dict) -> Board:
     """Update the given fields of a campaign: subject, preview_text, body, kind, lists, tags,
-    variables, template, sender_name, sender_address, reply_to, postal_address, track_clicks,
-    track_opens."""
+    variables, template, sender_name, sender_address, reply_to, postal_address, unsubscribe_line,
+    track_clicks, track_opens."""
 
     def work() -> Board:
         with _transaction() as connection:
@@ -933,7 +940,15 @@ def _render(
         frame = {**frame, "html": str(draft["frame_html"])}
     if "frame_text" in draft:
         frame = {**frame, "text": str(draft["frame_text"])}
-    for key in ("subject", "preview_text", "body", "sender_name", "postal_address", "reply_to"):
+    for key in (
+        "subject",
+        "preview_text",
+        "body",
+        "sender_name",
+        "postal_address",
+        "reply_to",
+        "unsubscribe_line",
+    ):
         if key in draft and isinstance(draft[key], str):
             campaign[key] = draft[key]
     if isinstance(draft.get("variables"), dict):
@@ -957,6 +972,7 @@ def _render(
             sender_name=pick("sender_name"),
             postal_address=pick("postal_address"),
             reply_to=pick("reply_to"),
+            unsubscribe_line=pick("unsubscribe_line"),
             resolve_image=lambda image_name: campaigns_repository.image_bytes(
                 connection, name, image_name
             ),

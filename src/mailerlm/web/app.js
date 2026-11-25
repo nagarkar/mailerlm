@@ -165,6 +165,7 @@ const SENDER_FIELDS = [
   ["sender_address", "Sender address", "An address on your verified sending domain"],
   ["reply_to", "Reply-to address", "Where replies, confirmations and unsubscribes arrive"],
   ["postal_address", "Postal address (footer)", "Required in every commercial email"],
+  ["unsubscribe_line", "Opt-out line (footer)", "How a reader stops your emails; it must say they can reply. Empty = the built-in wording"],
 ];
 
 async function settingsPage() {

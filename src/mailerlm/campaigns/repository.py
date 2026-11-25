@@ -22,7 +22,15 @@ from mailerlm.errors import NotFoundError
 Clock = Callable[[], datetime]
 TEMPLATE_DIRECTORY = Path(__file__).parent / "templates"
 BUILT_IN_TEMPLATE = "Plain letter"
-SENDER_SETTINGS = ("sender_name", "sender_address", "reply_to", "postal_address")
+SENDER_SETTINGS = (
+    "sender_name",
+    "sender_address",
+    "reply_to",
+    "postal_address",
+    "unsubscribe_line",
+)
+# The footer's opt-out line when the owner has set none (template variable `unsubscribe_line`).
+DEFAULT_UNSUBSCRIBE_LINE = "Reply UNSUBSCRIBE to this email and I will take you off the list."
 RESERVED_VARIABLES = {"first_name", "sender_name"}
 NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.\-]{0,59}$")
 VARIABLE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
@@ -37,6 +45,7 @@ CAMPAIGN_FIELDS = (
     "sender_address",
     "reply_to",
     "postal_address",
+    "unsubscribe_line",
     "track_clicks",
     "track_opens",
 )
@@ -62,8 +71,11 @@ def _name(value: object, what: str) -> str:
 
 
 def settings_get(connection: sqlite3.Connection) -> dict[str, str]:
+    """The sender defaults; an unset (or empty) opt-out line is `DEFAULT_UNSUBSCRIBE_LINE`."""
     stored = dict(connection.execute("SELECT key, value FROM setting"))
-    return {key: stored.get(key, "") for key in SENDER_SETTINGS}
+    settings = {key: stored.get(key, "") for key in SENDER_SETTINGS}
+    settings["unsubscribe_line"] = settings["unsubscribe_line"] or DEFAULT_UNSUBSCRIBE_LINE
+    return settings
 
 
 def settings_set(connection: sqlite3.Connection, values: dict[str, str]) -> None:
@@ -230,7 +242,7 @@ def campaign_save(
                 raise CampaignsError("kind must be campaign or confirmation")
             if key in ("track_clicks", "track_opens"):
                 value = int(bool(value))
-            elif key in ("sender_name", "sender_address", "reply_to", "postal_address"):
+            elif key in SENDER_SETTINGS:
                 value = (str(value).strip() or None) if value is not None else None
             elif not isinstance(value, str):
                 raise CampaignsError(f"{key} must be text")
@@ -275,7 +287,7 @@ def campaign_get(connection: sqlite3.Connection, name: str) -> dict:
     identifier = _campaign_id(connection, name)
     row = connection.execute(
         "SELECT c.name, c.kind, c.subject, c.preview_text, c.body, t.name, c.sender_name, c.sender_address, "
-        "c.reply_to, c.postal_address, c.track_clicks, c.track_opens, c.variables, c.created_at, c.updated_at "
+        "c.reply_to, c.postal_address, c.unsubscribe_line, c.track_clicks, c.track_opens, c.variables, c.created_at, c.updated_at "
         "FROM campaign c LEFT JOIN template t ON t.id = c.template_id WHERE c.id = ?",
         (identifier,),
     ).fetchone()
@@ -290,6 +302,7 @@ def campaign_get(connection: sqlite3.Connection, name: str) -> dict:
         "sender_address",
         "reply_to",
         "postal_address",
+        "unsubscribe_line",
         "track_clicks",
         "track_opens",
         "variables",

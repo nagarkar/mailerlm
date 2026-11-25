@@ -167,3 +167,45 @@ def test_a_template_previews_around_a_sample_letter_without_any_campaign(workspa
     )
     with pytest.raises(MailerlmError, match="template"):
         api.templates_preview("{{ body_html | safe }}{{ nope }}", "{{ body_text }}")
+
+
+OWNER_LINE = (
+    "I've assumed it's okay to send you these notes. If you'd rather not receive emails from me, "
+    "just reply and let me know, and I'll stop."
+)
+
+
+def test_a_new_workspace_keeps_the_reply_unsubscribe_line(workspace):
+    line = api.settings_get()["settings"]["unsubscribe_line"]
+    assert line == repository.DEFAULT_UNSUBSCRIBE_LINE
+    assert "reply" in line.lower()
+    api.campaigns_create("a", "update")
+    assert line in api.campaigns_preview("a", write_files=False)["text"]
+
+
+def test_the_opt_out_line_is_a_sender_default_a_campaign_can_override(workspace):
+    api.settings_save("Ann", "ann@mail.example.com", "ann+b@example.com", "1 Main St", OWNER_LINE)
+    assert api.settings_get()["settings"]["unsubscribe_line"] == OWNER_LINE
+    api.campaigns_create("a", "update")
+    text = api.campaigns_preview("a", write_files=False)["text"]
+    assert OWNER_LINE in text and "UNSUBSCRIBE" not in text
+    own = "Reply 'stop' and I will stop writing."
+    api.campaigns_save("a", {"unsubscribe_line": own})
+    assert api.campaigns_get("a")["campaign"]["unsubscribe_line"] == own
+    assert own in api.campaigns_preview("a", write_files=False)["text"]
+    api.campaigns_duplicate("a", "b")
+    assert api.campaigns_get("b")["campaign"]["unsubscribe_line"] == own
+    api.campaigns_save("a", {"unsubscribe_line": ""})
+    assert OWNER_LINE in api.campaigns_preview("a", write_files=False)["text"]
+
+
+def test_an_empty_setting_falls_back_to_the_default_line(workspace):
+    api.settings_save("Ann", "ann@mail.example.com", "ann+b@example.com", "1 Main St", "")
+    assert api.settings_get()["settings"]["unsubscribe_line"] == repository.DEFAULT_UNSUBSCRIBE_LINE
+
+
+def test_a_campaign_whose_opt_out_line_does_not_say_reply_is_flagged_by_check(workspace):
+    api.lists_add("book-interest")
+    api.campaigns_create("a", "update")
+    api.campaigns_save("a", {"unsubscribe_line": "Click to leave."})
+    assert any("opt-out line" in p for p in api.campaigns_check("a")["problems"])

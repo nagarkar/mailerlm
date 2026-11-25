@@ -3,8 +3,9 @@
 Example rows:
   setting:        ('sender_name', 'Ada Example')       -- account-wide defaults
   template:       (1, 'Plain letter', '<html>...', 'text frame', 1, '2026-10-11T12:00:00')
+  setting:        ('unsubscribe_line', 'If you'd rather not ... just reply')  -- the footer's opt-out line
   campaign:       (1, 'october-update', 'campaign', 'An update on {{ book_title }}', ...,
-                   '{"book_title": "The Book"}', ...)  -- sender fields NULL = use the defaults
+                   '{"book_title": "The Book"}', ...)  -- sender fields, unsubscribe_line NULL = use the defaults
   campaign_list:  (1, 1)      campaign_tag: (1, 'early-access')
   asset:          ('9f2c...', 'image/png', 48211, <bytes>, '2026-10-11T12:00:00')
   campaign_image: (1, 'cover.png', '9f2c...')   -- the name the Markdown uses
@@ -65,3 +66,6 @@ CREATE TABLE campaign_image (
     PRIMARY KEY (campaign_id, filename)
 ) STRICT
 """
+
+# A campaign's own opt-out line for the footer; NULL uses the Settings default.
+OPT_OUT_LINE_MIGRATION = "ALTER TABLE campaign ADD COLUMN unsubscribe_line TEXT"
