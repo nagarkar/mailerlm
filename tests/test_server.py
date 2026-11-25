@@ -52,6 +52,18 @@ def test_health_and_the_page_files(running):
     assert request(running, "GET", "/static/nope.js")[0] == 404
 
 
+def test_the_page_links_the_favicons_and_the_server_serves_them(running):
+    page = request(running, "GET", "/")[1].decode()
+    for name in ("favicon.ico", "favicon-32.png", "apple-touch-icon.png"):
+        assert f'href="/brand/{name}"' in page
+        status, data = request(running, "GET", f"/brand/{name}")
+        assert status == 200 and data == (ROOT / "src/mailerlm/web/brand" / name).read_bytes()
+    assert request(running, "GET", "/brand/favicon-32.png")[1][:8] == b"\x89PNG\r\n\x1a\n"
+    assert 'src="/brand/favicon-32.png"' in page  # the icon in the header
+    assert request(running, "GET", "/favicon.ico")[0] == 200
+    assert request(running, "GET", "/brand/nope.png")[0] == 404
+
+
 def test_a_foreign_host_gets_421(running):
     assert request(running, "GET", "/health", headers={"Host": "evil.example.com"})[0] == 421
     assert request(running, "GET", "/health", headers={"Host": "imac.tail0000.ts.net"})[0] == 200

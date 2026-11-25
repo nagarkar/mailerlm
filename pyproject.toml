@@ -42,10 +42,9 @@ allow-direct-references = true
 [tool.hatch.build.targets.wheel]
 packages = ["src/mailerlm"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"src/mailerlm/campaigns/templates" = "mailerlm/campaigns/templates"
-"src/mailerlm/campaigns/starters" = "mailerlm/campaigns/starters"
-"src/mailerlm/web" = "mailerlm/web"
+# The package directory ships whole: every non-Python file under src/mailerlm (email templates,
+# starters, the page files and the brand icons in web/brand) goes into the wheel. A force-include
+# of those folders would add each file twice and stop the build.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
