@@ -101,11 +101,29 @@ def build_parser() -> clikit.Parser:
         "Mark a list as a test list: every send whose lists are all test lists carries 'Testing: ' before its subject. The campaign's stored subject is not edited.",
         "mailerlm lists test Testing",
     )
+    lists_footer = list_verbs.add_parser(
+        "footer", help="show or hide the footer on letters to a list"
+    )
+    lists_footer.add_argument("name")
+    shown = lists_footer.add_mutually_exclusive_group(required=True)
+    shown.add_argument(
+        "--hide", dest="show", action="store_false", help="no opt-out line or postal address"
+    )
+    shown.add_argument("--show", dest="show", action="store_true", help="the footer (the default)")
+    _mutating(lists_footer)
+    lists_footer.set_defaults(api="lists_footer")
+    clikit.describe(
+        lists_footer,
+        "Show or hide the footer (opt-out line and postal address) on letters to a list. A letter "
+        "loses it only when every list it goes to hides it; the List-Unsubscribe header stays.",
+        "mailerlm lists footer friends --hide",
+    )
     lists_show = list_verbs.add_parser("show", help="every list with its member counts by status")
     lists_show.set_defaults(api="lists_show")
     clikit.describe(
         lists_show,
-        "Show every list with its member counts by consent status; a test list is marked [test list].",
+        "Show every list with its member counts by consent status; a test list is marked [test list], "
+        "a list that hides the footer [footer hidden].",
         "mailerlm lists show",
     )
 
@@ -388,6 +406,8 @@ def format_board(board: dict, as_json: bool) -> str:
             lines.append("lists:")
             for item in value:
                 mark = " [test list]" if item.get("test") else ""
+                if item.get("show_footer") is False:
+                    mark += " [footer hidden]"
                 lines.append(
                     f"  {item['name']}: {item['members']} members {item['by_status']}{mark}"
                 )

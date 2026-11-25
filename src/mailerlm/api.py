@@ -397,6 +397,23 @@ def lists_test(name: str, clear: bool = False, dry_run: bool = False) -> Board:
     return _guard(work)
 
 
+def lists_footer(name: str, show: bool, dry_run: bool = False) -> Board:
+    """Show or hide the footer (opt-out line and postal address) on letters to this list. A letter
+    loses its footer only when every list it goes to hides it; the List-Unsubscribe header stays."""
+
+    def work() -> Board:
+        with _transaction(dry_run) as connection:
+            repository.set_show_footer(connection, name, show)
+        return {
+            "dry_run": dry_run,
+            "list": name,
+            "show_footer": show,
+            "next": "Run: mailerlm lists show",
+        }
+
+    return _guard(work)
+
+
 def lists_edit(
     name: str, new_name: str, sender_name: str | None = None, sender_address: str | None = None
 ) -> Board:
@@ -960,6 +977,7 @@ def _render(
 
     # A test list's mail says so in the subject; only the rendered letter changes, never the row.
     campaign["test_list"] = audience.is_test(connection, tuple(campaign["lists"]))
+    campaign["footer_hidden"] = audience.footer_hidden(connection, tuple(campaign["lists"]))
     subject = campaign["subject"]
     try:
         email = render.render(
@@ -973,6 +991,7 @@ def _render(
             postal_address=pick("postal_address"),
             reply_to=pick("reply_to"),
             unsubscribe_line=pick("unsubscribe_line"),
+            show_footer=not campaign["footer_hidden"],
             resolve_image=lambda image_name: campaigns_repository.image_bytes(
                 connection, name, image_name
             ),
@@ -1003,6 +1022,7 @@ def campaigns_check(name: str) -> Board:
             "kind": campaign["kind"],
             "subject": email.subject,
             "test_list": campaign["test_list"],
+            "footer": _footer(campaign),
             "lists": campaign["lists"],
             "tags": campaign["tags"],
             "would_reach": len(reach.emails),
@@ -1146,6 +1166,8 @@ def _prepare(connection: sqlite3.Connection, name: str) -> dict:
         ("reply_to", "reply-to address"),
         ("postal_address", "postal address"),
     ):
+        if key == "postal_address" and campaign["footer_hidden"]:
+            continue
         if not who[key]:
             problems.append(f"no {label} set (Settings, or this campaign's Sender section)")
     if not campaign["lists"]:
@@ -1183,6 +1205,10 @@ def _prepare(connection: sqlite3.Connection, name: str) -> dict:
     }
 
 
+def _footer(campaign: dict) -> str:
+    return "hidden: every list is set to hide it" if campaign["footer_hidden"] else "shown"
+
+
 def sends_plan(name: str) -> Board:
     """What a real send would do right now, with the fingerprint that `sends_start` must repeat."""
 
@@ -1213,6 +1239,7 @@ def sends_plan(name: str) -> Board:
             "kind": plan["campaign"]["kind"],
             "subject": plan["email"].subject,
             "test_list": plan["campaign"]["test_list"],
+            "footer": _footer(plan["campaign"]),
             "from": f"{who['sender_name']} <{who['sender_address']}>",
             "reply_to": who["reply_to"],
             "lists": plan["campaign"]["lists"],

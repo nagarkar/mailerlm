@@ -4,11 +4,14 @@ The body is Markdown (tables, links, lists, images, quotes, code); raw HTML in i
 rendered. The body may use `{{ first_name }}`, `{{ book_title }}` and `{{ sender_name }}`.
 Images are local files next to the campaign (or below it); each becomes an inline `cid:`
 attachment after `images.prepare`. The footer carries the postal address and the
-reply-to-unsubscribe line.
+opt-out line. When the footer is hidden (`show_footer=False`), both are cut out of whatever
+template frames the letter, with the elements and separator lines that held only them, so an
+owner-edited template needs no change.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -137,6 +140,58 @@ def _style_tokens(tokens: list[Token]) -> None:
                     child.attrSet("style", STYLES["code"])
 
 
+# Stand-ins rendered in place of the footer values (and the letter) when the footer is hidden;
+# letters only, so autoescaping leaves them alone.
+_OPT_OUT_MARK = "MAILERLMFOOTEROPTOUTd41f"
+_POSTAL_MARK = "MAILERLMFOOTERPOSTALd41f"
+_BODY_MARK = "MAILERLMBODYd41f"
+_FOOTER_MARKS = (_OPT_OUT_MARK, _POSTAL_MARK)
+_WRAPPERS = r"td|tr|div|p|span|footer|section|small|center"
+_OPENING_AT_END = re.compile(rf"<({_WRAPPERS})\b[^>]*>\s*$", re.I)
+_CLOSING_AT_START = re.compile(rf"\s*</({_WRAPPERS})>", re.I)
+_SEPARATOR = re.compile(r"^\s*(-{2,}\s*)?$")
+
+
+def _html_without_footer(html: str) -> str:
+    """Cut the footer marks, the text beside them up to the nearest tag, and any element left
+    empty around the cut. Marks on either side of the letter are cut one at a time."""
+    found = sorted(i for mark in _FOOTER_MARKS for i in _positions(html, mark))
+    if not found:
+        return html
+    body = html.find(_BODY_MARK)
+    last_end = found[-1] + len(_POSTAL_MARK)
+    if body == -1 or not (found[0] < body < last_end):
+        spans = [(found[0], last_end)]
+    else:
+        spans = [(i, i + len(_POSTAL_MARK)) for i in found]
+    for start, end in reversed(spans):
+        start = html.rfind(">", 0, start) + 1
+        after = html.find("<", end)
+        html = html[:start] + (html[after:] if after != -1 else "")
+        while True:  # unwrap elements the cut left empty, innermost first
+            opening = _OPENING_AT_END.search(html, 0, start)
+            closing = _CLOSING_AT_START.match(html, start)
+            if not (opening and closing and opening.group(1).lower() == closing.group(1).lower()):
+                break
+            html = html[: opening.start()] + html[closing.end() :]
+            start = opening.start()
+    return html
+
+
+def _positions(text: str, mark: str) -> list[int]:
+    return [m.start() for m in re.finditer(mark, text)]
+
+
+def _text_without_footer(text: str) -> str:
+    """Drop every line holding a footer mark, then blank and `--` lines at either end."""
+    lines = [line for line in text.split("\n") if not any(m in line for m in _FOOTER_MARKS)]
+    while lines and _SEPARATOR.match(lines[-1]):
+        lines.pop()
+    while lines and _SEPARATOR.match(lines[0]):
+        lines.pop(0)
+    return "\n".join(lines) + "\n"
+
+
 def _body_environment() -> SandboxedEnvironment:
     return SandboxedEnvironment(undefined=StrictUndefined, autoescape=False)
 
@@ -155,6 +210,7 @@ def render(
     resolve_image: Callable[[str], bytes | None],
     image_budget_bytes: int,
     first_name: str = "there",
+    show_footer: bool = True,
 ) -> RenderedEmail:
     """Everything is passed in; nothing is read from disk. `resolve_image(name)` returns the bytes of
     the campaign's image of that name, or None."""
@@ -222,11 +278,18 @@ def render(
         "unsubscribe_line": unsubscribe_line.strip(),
         "sender_name": sender_name,
     }
-    if not postal_address:
+    if not show_footer:
+        context |= {
+            "body_html": _BODY_MARK,
+            "body_text": _BODY_MARK,
+            "postal_address": _POSTAL_MARK,
+            "unsubscribe_line": _OPT_OUT_MARK,
+        }
+    elif not postal_address:
         warnings.append("no postal address set (Settings or this campaign); a real send needs one")
     if not reply_to:
         warnings.append("no reply-to address set; unsubscribe by reply cannot work")
-    if "reply" not in unsubscribe_line.lower():
+    if show_footer and "reply" not in unsubscribe_line.lower():
         warnings.append(
             "the opt-out line must tell the reader they can stop the emails by reply "
             "(Settings, or this campaign's Sender section)"
@@ -244,6 +307,9 @@ def render(
         )
     except Exception as error:  # a template the owner edited
         raise RenderError(f"the template has a problem ({error})") from error
+    if not show_footer:
+        html_out = _html_without_footer(html_out).replace(_BODY_MARK, body_html)
+        text_out = _text_without_footer(text_out).replace(_BODY_MARK, body_text)
     return RenderedEmail(
         subject=subject,
         html=html_out,

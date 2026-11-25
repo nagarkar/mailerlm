@@ -46,6 +46,7 @@ METHODS = (
     "lists_add",
     "lists_edit",
     "lists_test",
+    "lists_footer",
     "lists_delete",
     "contacts_find",
     "contacts_import_text",

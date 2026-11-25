@@ -205,6 +205,14 @@ def set_test_list(connection: sqlite3.Connection, name: str, value: bool) -> Non
     )
 
 
+def set_show_footer(connection: sqlite3.Connection, name: str, value: bool) -> None:
+    """Show the footer (opt-out line and postal address) on letters to this list, or hide it."""
+    connection.execute(
+        "UPDATE mailing_list SET show_footer = ? WHERE id = ?",
+        (int(value), list_id(connection, name)),
+    )
+
+
 def delete_list(connection: sqlite3.Connection, name: str) -> None:
     connection.execute("DELETE FROM mailing_list WHERE id = ?", (list_id(connection, name),))
 
@@ -284,12 +292,12 @@ def find(
 
 def lists_summary(connection: sqlite3.Connection) -> list[dict]:
     rows = connection.execute(
-        "SELECT l.name, l.sender_name, l.sender_address, l.is_test, "
+        "SELECT l.name, l.sender_name, l.sender_address, l.is_test, l.show_footer, "
         "(SELECT COUNT(*) FROM membership m WHERE m.list_id = l.id) FROM mailing_list l "
         "ORDER BY l.name"
     ).fetchall()
     out = []
-    for name, sender_name, sender_address, is_test, members in rows:
+    for name, sender_name, sender_address, is_test, show_footer, members in rows:
         by_status = dict(
             connection.execute(
                 "SELECT m.status, COUNT(*) FROM membership m JOIN mailing_list l ON l.id = m.list_id "
@@ -301,6 +309,7 @@ def lists_summary(connection: sqlite3.Connection) -> list[dict]:
             {
                 "name": name,
                 "test": bool(is_test),
+                "show_footer": bool(show_footer),
                 "members": members,
                 "by_status": by_status,
                 "sender_name": sender_name or "",

@@ -12,6 +12,7 @@ Verbs today (more arrive with the implementation issues; each prints a board, `-
 - `mailerlm gmail connect`: owner's act; opens a browser for readonly consent and stores the token.
 - `mailerlm lists add <name> [--sender-name N --sender-address A] [--dry-run]`, `mailerlm lists show`: lists and their member counts by status.
 - `mailerlm lists test <name> [--clear] [--dry-run]`: marks a list as a test list (`lists show` prints `[test list]`). Every send whose lists are all test lists carries `Testing: ` before its subject, added at render time; the campaign's stored subject is never edited. A test list changes nothing about consent or about who may send.
+- `mailerlm lists footer <name> --hide|--show [--dry-run]`: hides or shows the footer (opt-out line and postal address) on letters to a list; shown by default, `lists show` prints `[footer hidden]`. A letter loses its footer only when every list it goes to hides it; the `List-Unsubscribe: mailto:` header stays. Agents do not change this setting; it is the owner's (see `mailerlm.consent`).
 - `mailerlm contacts import <file|-> [--list L] [--tag T] [--dry-run]`: pasted text ('Name: email', 'Name <email>', LinkedIn URLs) or a CSV with an email header; re-import adds nothing.
 - `mailerlm contacts add --email E [--name N] [--linkedin-url U] [--list L]`: one contact.
 - `mailerlm contacts tag <email> <tag>` and `mailerlm contacts untag <email> <tag>`.
