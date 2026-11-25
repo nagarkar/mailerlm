@@ -32,6 +32,23 @@ def _mutating(parser) -> None:
     )
 
 
+def _reason(parser) -> None:
+    parser.add_argument(
+        "--reason",
+        required=True,
+        help="why no confirmation letter is needed, e.g. 'known personally', 'confirmed by email' "
+        "or 'confirmed in person'",
+    )
+
+
+def _confirm_reason(parser) -> None:
+    parser.add_argument(
+        "--confirm-reason",
+        dest="confirm_reason",
+        help="also confirm them on --list yourself, with this reason (e.g. 'known personally')",
+    )
+
+
 def _send_lists(parser) -> None:
     parser.add_argument(
         "--list",
@@ -127,6 +144,20 @@ def build_parser() -> clikit.Parser:
         "loses it only when every list it goes to hides it; the List-Unsubscribe header stays.",
         "mailerlm lists footer friends --hide",
     )
+    lists_confirm = list_verbs.add_parser(
+        "confirm", help="confirm everyone on a list yourself, with a reason"
+    )
+    lists_confirm.add_argument("list_name", metavar="list")
+    _reason(lists_confirm)
+    _mutating(lists_confirm)
+    lists_confirm.set_defaults(api="lists_confirm")
+    clikit.describe(
+        lists_confirm,
+        "Confirm everyone on a list who is imported or pending, without a confirmation letter, with one "
+        "required reason; --dry-run shows who would change. People marked do-not-mail, unsubscribed or "
+        "suppressed are left as they are and listed; other lists are untouched.",
+        'mailerlm lists confirm friends --reason "known personally" --dry-run',
+    )
     lists_show = list_verbs.add_parser("show", help="every list with its member counts by status")
     lists_show.set_defaults(api="lists_show")
     clikit.describe(
@@ -143,6 +174,7 @@ def build_parser() -> clikit.Parser:
     add.add_argument("--name", default="")
     add.add_argument("--linkedin-url", dest="linkedin_url")
     _list_and_tags(add)
+    _confirm_reason(add)
     _mutating(add)
     add.set_defaults(api="contacts_add")
     clikit.describe(
@@ -153,12 +185,37 @@ def build_parser() -> clikit.Parser:
     imp = contact_verbs.add_parser("import", help="import pasted text or a CSV")
     imp.add_argument("source", help="a file, or - for standard input")
     _list_and_tags(imp)
+    _confirm_reason(imp)
     _mutating(imp)
     imp.set_defaults(api="contacts_import")
     clikit.describe(
         imp,
         "Import lines like 'Name: email', 'Name <email>', a LinkedIn profile URL, or a CSV with an email header. Re-importing adds nothing.",
         "mailerlm contacts import people.txt --list book-interest --dry-run",
+    )
+    confirm = contact_verbs.add_parser(
+        "confirm", help="confirm one person on one list yourself, with a reason"
+    )
+    confirm.add_argument("contact", help="an email address or a contact id")
+    confirm.add_argument("list_name", metavar="list")
+    _reason(confirm)
+    _mutating(confirm)
+    confirm.set_defaults(api="contacts_confirm")
+    clikit.describe(
+        confirm,
+        "Confirm one person on one list without a confirmation letter (imported or pending -> subscribed), "
+        "with a required reason; their other lists are untouched. Never for someone marked do-not-mail, "
+        "unsubscribed or suppressed.",
+        'mailerlm contacts confirm ada@example.com friends --reason "known personally"',
+    )
+    history = contact_verbs.add_parser("history", help="every consent change of one person")
+    history.add_argument("contact", help="an email address or a contact id")
+    history.set_defaults(api="contacts_history")
+    clikit.describe(
+        history,
+        "Show every consent change of a person's memberships and how it happened: a confirmation "
+        "letter, their reply, your confirmation and its reason, a request to stop.",
+        "mailerlm contacts history ada@example.com",
     )
     find = contact_verbs.add_parser("find", help="find contacts (addresses masked)")
     find.add_argument("--list", dest="list_name")
@@ -433,8 +490,20 @@ def format_board(board: dict, as_json: bool) -> str:
             for row in value:
                 flag = " DO-NOT-MAIL" if row["do_not_mail"] else ""
                 linkedin = " linkedin" if row["linkedin_url"] else ""
+                how = f" confirmed={row['confirmed']}" if row.get("confirmed") else ""
                 lines.append(
-                    f"  {row['email']} {row['name']!r} lists={row['lists']} tags={row['tags']}{linkedin}{flag}"
+                    f"  {row['email']} {row['name']!r} lists={row['lists']}{how} tags={row['tags']}{linkedin}{flag}"
+                )
+        elif key in ("would_confirm", "confirmed", "declined") and isinstance(value, list):
+            lines.append(f"{key}: {len(value)}")
+            for item in value:
+                why = f": {item['why']}" if item.get("why") else ""
+                lines.append(f"  #{item['contact']} {item['name']!r} {item['email']}{why}")
+        elif key == "history":
+            lines.append("history:" if value else "history: none")
+            for item in value:
+                lines.append(
+                    f"  {item['at']} {item['list']}: {item['previous']} -> {item['new']} ({item['how']})"
                 )
         elif key in ("html", "text") and not str(value).startswith("/"):
             lines.append(f"{key}: ({len(str(value))} characters; use --json to read it)")

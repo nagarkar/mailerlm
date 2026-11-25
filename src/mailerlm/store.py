@@ -39,6 +39,7 @@ MIGRATIONS: list[str] = [
     campaigns_schema.OPT_OUT_LINE_MIGRATION,
     contacts_schema.FOOTER_MIGRATION,
     delivery_schema.LIST_MIGRATION,
+    contacts_schema.CONFIRMATION_MIGRATION,
 ]
 
 
