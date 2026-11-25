@@ -13,10 +13,10 @@ Decisions:
 - Imported contacts arrive with membership status `imported`, which no campaign mails. (owner)
 - A list may override the sender name and address; the default sender comes from config. (owner)
 - A list can be marked as a test list (`mailing_list.is_test`, `mailerlm lists test <name>`, the
-  checkbox in the list's details). A send whose lists are all test lists carries "Testing: " before
-  its subject, added when the letter is rendered; the campaign's stored subject is never edited, so
-  the same campaign goes to its real list afterwards unchanged. A test list changes nothing else:
-  its members confirm like everyone else. (owner, 2026-11-25)
+  checkbox in the list's details). A reader reached through a test list gets "Testing: " before the
+  subject (per list, see `mailerlm.campaigns`), added when the letter is rendered; the campaign's
+  stored subject is never edited, so the same campaign goes to its real list afterwards unchanged. A
+  test list changes nothing else: its members confirm like everyone else. (owner)
 - A list shows the footer (opt-out line and postal address) unless it is set to hide it
   (`mailing_list.show_footer`, `mailerlm lists footer <name> --hide|--show`, the checkbox in the list's
   details). The rule and its reason are in `mailerlm.consent`. (owner)

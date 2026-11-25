@@ -1,13 +1,14 @@
 """Sends: the record of what was sent to whom, and the loop that sends it.
 
 A send is planned (who, what, a fingerprint of both), recorded (one `delivery` row per person,
-queued), then run: each queued row is handed to the `MailSender` with an idempotency key, and the row
+queued, with the list they are reached through and how their letter looks), then run: each queued row is handed to the `MailSender` with an idempotency key, and the row
 becomes `sent` or `failed`. A run that stops half-way is resumed from the queued rows; the key keeps a
 person from being mailed twice. Later `poll` moves rows to delivered, bounced and so on.
 """
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from collections.abc import Callable
@@ -22,9 +23,16 @@ TERMINAL = {"bounced", "complained", "failed"}
 
 @dataclass(frozen=True, slots=True)
 class Recipient:
+    """One person of a send. `list_name` is the list they are reached through; `show_footer` and
+    `test_prefix` are how their letter looks. None (a send from before per-list sends) means: as
+    the campaign's first list would have it."""
+
     contact_id: int | None
     email: str
     first_name: str
+    list_name: str | None = None
+    show_footer: bool | None = None
+    test_prefix: bool | None = None
 
 
 def _stamp(now: Callable[[], datetime]) -> str:
@@ -58,14 +66,15 @@ def create_send(
     recipients: list[Recipient],
     now: Callable[[], datetime] = datetime.now,
     excerpt: str = "",
+    lists: tuple[str, ...] = (),
 ) -> int:
     campaign = connection.execute(
         "SELECT id FROM campaign WHERE name = ?", (campaign_name,)
     ).fetchone()
     stamp = _stamp(now)
     cursor = connection.execute(
-        "INSERT INTO send (campaign_id, campaign_name, kind, status, subject, fingerprint, planned, created_at, excerpt) "
-        "VALUES (?, ?, ?, 'sending', ?, ?, ?, ?, ?)",
+        "INSERT INTO send (campaign_id, campaign_name, kind, status, subject, fingerprint, planned, created_at, excerpt, lists) "
+        "VALUES (?, ?, ?, 'sending', ?, ?, ?, ?, ?, ?)",
         (
             campaign[0] if campaign else None,
             campaign_name,
@@ -75,15 +84,41 @@ def create_send(
             len(recipients),
             stamp,
             excerpt[:1500],
+            json.dumps(list(lists)),
         ),
     )
     send_id = int(cursor.lastrowid or 0)
     for recipient in recipients:
         connection.execute(
-            "INSERT INTO delivery (send_id, contact_id, email, status, updated_at) VALUES (?, ?, ?, 'queued', ?)",
-            (send_id, recipient.contact_id, recipient.email, stamp),
+            "INSERT INTO delivery (send_id, contact_id, email, status, updated_at, list_id, list_name, "
+            "show_footer, test_prefix) VALUES (?, ?, ?, 'queued', ?, "
+            "(SELECT id FROM mailing_list WHERE name = ?), ?, ?, ?)",
+            (
+                send_id,
+                recipient.contact_id,
+                recipient.email,
+                stamp,
+                recipient.list_name,
+                recipient.list_name,
+                _flag(recipient.show_footer),
+                _flag(recipient.test_prefix),
+            ),
         )
     return send_id
+
+
+def _flag(value: bool | None) -> int | None:
+    return None if value is None else int(value)
+
+
+def _bool(value: int | None) -> bool | None:
+    return None if value is None else bool(value)
+
+
+def send_lists(connection: sqlite3.Connection, send_id: int) -> tuple[str, ...]:
+    """The lists a send was planned for, in order (empty for a send from before per-list sends)."""
+    row = connection.execute("SELECT lists FROM send WHERE id = ?", (send_id,)).fetchone()
+    return tuple(json.loads(row[0])) if row else ()
 
 
 def run_send(
@@ -100,14 +135,18 @@ def run_send(
         "UPDATE send SET started_at = COALESCE(started_at, ?) WHERE id = ?", (_stamp(now), send_id)
     )
     rows = connection.execute(
-        "SELECT id, contact_id, email FROM delivery WHERE send_id = ? AND status = 'queued' ORDER BY id",
+        "SELECT id, contact_id, email, list_name, show_footer, test_prefix FROM delivery "
+        "WHERE send_id = ? AND status = 'queued' ORDER BY id",
         (send_id,),
     ).fetchall()
-    for position, (delivery_id, contact_id, email) in enumerate(rows):
-        first_name = _first_name(connection, contact_id)
+    for position, (delivery_id, contact_id, email, list_name, footer, prefix) in enumerate(rows):
+        first_name = _first_name(connection, contact_id) if contact_id is not None else "there"
+        recipient = Recipient(
+            contact_id, email, first_name, list_name, _bool(footer), _bool(prefix)
+        )
         key = f"mailerlm-send-{send_id}-{email}"
         try:
-            provider_id = sender.send(build_message(Recipient(contact_id, email, first_name), key))
+            provider_id = sender.send(build_message(recipient, key))
             connection.execute(
                 "UPDATE delivery SET status = 'sent', provider_id = ?, error = NULL, updated_at = ? WHERE id = ?",
                 (provider_id, _stamp(now), delivery_id),

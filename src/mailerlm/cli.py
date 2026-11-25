@@ -32,6 +32,15 @@ def _mutating(parser) -> None:
     )
 
 
+def _send_lists(parser) -> None:
+    parser.add_argument(
+        "--list",
+        dest="lists",
+        action="append",
+        help="a list to send to; repeat for several, in order (default: the campaign's lists)",
+    )
+
+
 def _list_and_tags(parser) -> None:
     parser.add_argument("--list", dest="list_name", help="join this list")
     parser.add_argument(
@@ -258,6 +267,11 @@ def build_parser() -> clikit.Parser:
     preview.add_argument(
         "--first-name", dest="first_name", default="Friend", help="name used for {{ first_name }}"
     )
+    preview.add_argument(
+        "--list",
+        dest="list_name",
+        help="render it as a reader of this list gets it (default: the campaign's first list)",
+    )
     preview.set_defaults(api="campaigns_preview")
     clikit.describe(
         preview,
@@ -271,16 +285,18 @@ def build_parser() -> clikit.Parser:
         "plan", help="show what a real send would do, with its fingerprint"
     )
     plan.add_argument("name")
+    _send_lists(plan)
     plan.set_defaults(api="sends_plan")
     clikit.describe(
         plan,
-        "Show who a real send would reach, from where, and the fingerprint 'sends start' needs. Sends nothing.",
+        "Show who a real send would reach, list by list (recipients, footer, 'Testing: ', skipped), any person who would be mailed through two chosen lists (that stops the send), and the fingerprint 'sends start' needs with the same lists. Sends nothing.",
         "mailerlm sends plan october-update",
     )
     test = send_verbs.add_parser(
         "test", help="send the campaign once, to your own reply-to address"
     )
     test.add_argument("name")
+    _send_lists(test)
     test.set_defaults(api="sends_test")
     clikit.describe(
         test,
@@ -291,12 +307,13 @@ def build_parser() -> clikit.Parser:
         "start", help="send the campaign to its audience (the owner's act)"
     )
     start.add_argument("name")
+    _send_lists(start)
     start.add_argument("--fingerprint", required=True, help="the fingerprint shown by 'sends plan'")
     start.set_defaults(api="sends_start")
     clikit.describe(
         start,
         "Mail the campaign to everyone the plan listed. It repeats the plan and stops if anything changed since you looked. Only the owner runs this.",
-        "mailerlm sends start october-update --fingerprint 1a2b3c4d5e6f7a8b",
+        "mailerlm sends start october-update --list friends --fingerprint 1a2b3c4d5e6f7a8b",
     )
     resume = send_verbs.add_parser("resume", help="finish an interrupted send")
     resume.add_argument("send", type=int)
@@ -433,9 +450,18 @@ def format_board(board: dict, as_json: bool) -> str:
                 lines.append(
                     f"  #{item['id']} {item['campaign_name']} ({item['kind']}, {item['status']}) {item['counts']}"
                 )
-        elif key in ("problems", "blockers"):
-            lines.append("problems:" if value else "problems: none")
+        elif key in ("problems", "blockers", "notes"):
+            lines.append(f"{key}:" if value else f"{key}: none")
             lines += [f"  {item}" for item in value]
+        elif key == "by_list":
+            lines.append("by_list:")
+            for item in value:
+                prefix = ", 'Testing: ' prefix" if item["testing_prefix"] else ""
+                skipped = f", skipped {item['skipped']}" if item["skipped"] else ""
+                lines.append(
+                    f"  {item['list']}: {item['recipients']} recipient{'' if item['recipients'] == 1 else 's'}, footer {item['footer']}"
+                    f"{prefix}, from {item['from']}, subject {item['subject']!r}{skipped}"
+                )
         elif key == "env_diff":
             if value:
                 lines.append("env_diff:")

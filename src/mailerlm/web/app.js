@@ -392,7 +392,7 @@ async function campaignPage(name) {
         if (await attempt(() => api("campaigns_delete", { name }), "Campaign deleted")) location.hash = "#/campaigns";
       }, "Delete this campaign and its images"))),
     h("p", { class: "sub" }, `${campaign.kind === "confirmation" ? "Confirmation letter" : "Campaign"} · edited ${when(campaign.updated_at)}`));
-  root.append(checkPanel(name), sendPanel(campaign), detailsSection(campaign, listNames, templates), valuesSection(campaign), senderSection(campaign, settings),
+  root.append(checkPanel(name), sendPanel(campaign, lists), detailsSection(campaign, listNames, templates), valuesSection(campaign), senderSection(campaign, settings),
     bodySection(campaign), imagesSection(campaign), previewSection(campaign));
   return root;
 }
@@ -565,8 +565,32 @@ function previewSection(campaign) {
     message, frame, h("details", { style: "margin-top:10px" }, h("summary", {}, "Plain-text version"), plain));
 }
 
-function sendPanel(campaign) {
+// One letter per person, in the look of the list they are reached through; the owner picks the lists
+// for each send. The pick lives in localStorage per campaign (a personal working choice, not worth a
+// URL), so a reload keeps it; it starts as the campaign's own lists.
+function sendLists(name, campaignLists) {
+  const key = `mailerlm.sendLists.${name}`;
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(key) || "null"); } catch (_) { saved = null; }
+  return {
+    get: () => (Array.isArray(saved) ? saved : campaignLists),
+    set: (value) => { saved = value; try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) { /* private window */ } },
+  };
+}
+
+function sendPanel(campaign, allLists) {
   const name = campaign.name;
+  const pick = sendLists(name, campaign.lists);
+  const known = new Set(allLists.map((l) => l.name));
+  const ordered = [...pick.get().filter((n) => known.has(n)), ...allLists.map((l) => l.name).filter((n) => !pick.get().includes(n))];
+  const boxes = ordered.map((listName) => {
+    const info = allLists.find((l) => l.name === listName);
+    const box = h("input", { type: "checkbox", checked: pick.get().includes(listName) });
+    box.addEventListener("change", () => { pick.set(ordered.filter((_, i) => boxes[i].box.checked)); review.replaceChildren(); });
+    return { box, label: h("label", { style: "display:flex;gap:8px;align-items:center" }, box, listName,
+      h("span", { class: "small" }, ` · ${info.members} members${info.test ? " · test list" : ""}${info.show_footer ? "" : " · footer hidden"}`)) };
+  });
+  const chosen = () => ordered.filter((_, i) => boxes[i].box.checked);
   const review = h("div");
   const history = h("div");
   let timer = null;
@@ -582,30 +606,33 @@ function sendPanel(campaign) {
     if (busy) timer = setTimeout(drawHistory, 2000);
   };
   const plan = async () => {
-    const out = await attempt(() => api("sends_plan", { name }));
+    const out = await attempt(() => api("sends_plan", { name, lists: chosen() }));
     if (!out) return;
     const go = h("span");
     const arm = h("button", { class: "primary", disabled: !out.can_send, on: { click: () => go.replaceChildren(
       h("span", {}, `Send to ${plural(out.recipients, "person", "people")} now? `),
       h("button", { class: "primary", on: { click: async () => {
-        const started = await attempt(() => api("sends_start", { name, fingerprint: out.fingerprint, background: true }), "Sending started");
+        const started = await attempt(() => api("sends_start", { name, fingerprint: out.fingerprint, lists: out.lists, background: true }), "Sending started");
         if (started) { review.replaceChildren(h("div", { class: "notice good" }, "Sending. Progress is below.")); drawHistory(); }
       } } }, "Yes, send"), h("button", { on: { click: () => go.replaceChildren(arm) } }, "Cancel")) } }, `Send to ${plural(out.recipients, "person", "people")}`);
     go.append(arm);
     review.replaceChildren(
       h("div", { class: "notice" }, h("div", {}, h("strong", {}, "From: "), out.from, " · replies to ", out.reply_to), h("div", {}, h("strong", {}, "Subject: "), out.subject),
-        h("div", {}, h("strong", {}, "List: "), out.lists.length ? out.lists.join(", ") : "none chosen", out.test_list ? " (test list: the subject says “Testing: ”)" : "", out.footer && out.footer !== "shown" ? ` (footer ${out.footer})` : "", out.tags.length ? ` (only people tagged ${out.tags.join(", ")})` : ""),
-        h("div", {}, h("strong", {}, "Reaches: "), plural(out.recipients, "person", "people"), Object.keys(out.skipped).length ? " (not reached: " + Object.entries(out.skipped).map(([why, n]) => `${n} ${why}`).join(", ") + ")" : ""),
+        h("div", {}, h("strong", {}, "Reaches: "), plural(out.recipients, "person", "people"), out.tags.length ? ` (only people tagged ${out.tags.join(", ")})` : ""),
+        out.by_list.map((row) => h("div", { class: "small" }, h("strong", {}, row.list), `: ${plural(row.recipients, "person", "people")} · footer ${row.footer} · subject “${row.subject}” · from ${row.from}`,
+          Object.keys(row.skipped).length ? " · not reached: " + Object.entries(row.skipped).map(([why, n]) => `${n} ${why}`).join(", ") : "")),
         h("div", { class: "small" }, `Review code ${out.fingerprint}: the send stops if the letter or audience changes after this.`)),
       ...(out.blockers.length ? [h("div", { class: "notice bad" }, out.blockers.map((b) => h("div", {}, "• " + b)))] : []),
-      ...(out.problems.length ? [h("div", { class: "notice warn" }, out.problems.map((b) => h("div", {}, "• " + b)))] : []), go);
+      ...(out.problems.length ? [h("div", { class: "notice warn" }, out.problems.map((b) => h("div", {}, "• " + b)))] : []),
+      ...(out.notes.length ? [h("div", { class: "notice" }, h("strong", {}, "Notes (not blocking): "), out.notes.map((b) => h("div", {}, "• " + b)))] : []), go);
   };
   drawHistory();
   return h("section", { class: "panel" }, h("header", {}, h("h2", {}, "Send"),
     h("div", { class: "row" },
-      h("button", { on: { click: async () => { if (await attempt(() => api("sends_test", { name }), "Test sent to your reply-to address")) drawHistory(); } } }, "Send test to me"),
+      h("button", { on: { click: async () => { if (await attempt(() => api("sends_test", { name, lists: chosen() }), "Test sent to your reply-to address")) drawHistory(); } } }, "Send test to me"),
       h("button", { on: { click: plan } }, "Review the real send"))),
-    h("p", { class: "small" }, "A test goes only to your own reply-to address. The real send shows exactly who it reaches and waits for your confirmation."),
+    h("p", { class: "small" }, "Send to these lists. Each person gets one letter, with the footer, “Testing: ” and sender of their list. Someone who would be mailed through two ticked lists stops the send until you take them off one. A test goes only to your own reply-to address, as the first ticked list's readers see it."),
+    h("div", {}, boxes.map((b) => b.label)),
     review, h("h2", { style: "margin-top:16px;font-size:16px" }, "History"),
     h("div", { class: "row", style: "margin:6px 0" }, h("button", { class: "quiet", on: { click: async () => { if (await attempt(() => api("sends_poll", {}), "Delivery status updated")) drawHistory(); } } }, "Refresh delivery status")), history);
 }

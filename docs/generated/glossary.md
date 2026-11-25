@@ -2,7 +2,7 @@
 
 # Glossary
 
-- **audience** (`mailerlm.campaigns`): the subscribed members of the campaign's lists that carry its tags.
+- **audience** (`mailerlm.campaigns`): the subscribed members of the lists chosen for a send that carry the campaign's tags.
 - **campaign** (`mailerlm.campaigns`): one letter with its subject, body, values, lists, tags and flags, sent once.
 - **contact** (`mailerlm.contacts`): one person, identified by a normalized email address and optionally a LinkedIn profile URL.
 - **double opt-in** (`mailerlm.consent`): a contact is mailed campaigns only after replying yes to a confirmation email.
@@ -13,8 +13,10 @@
 - **list** (`mailerlm.contacts`): a named audience a campaign is sent to; a contact may be on several.
 - **membership** (`mailerlm.contacts`): a contact's place on one list, with its consent status.
 - **needs-you queue** (`mailerlm.consent`): replies the classifier did not settle, waiting for the owner.
+- **overlap** (`mailerlm.campaigns`): a person who would be mailed through two or more of the lists chosen for one send; it stops the send.
+- **reached through** (`mailerlm.campaigns`): the one chosen list a reader is mailed through; its settings shape their letter.
 - **reply** (`mailerlm.inbox`): a message from someone mailerlm has mailed, stored with the letter it answers and what was decided.
-- **send** (`mailerlm.delivery`): one campaign delivered (or tested) to one audience, with a row per recipient.
+- **send** (`mailerlm.delivery`): one campaign delivered (or tested) to the lists chosen for it, with a row per recipient that records the list they were reached through.
 - **starter** (`mailerlm.campaigns`): a shipped campaign text that a new campaign is created from.
 - **tag** (`mailerlm.contacts`): a free label on a contact, such as `early-access`, used to narrow a campaign's audience.
 - **template** (`mailerlm.campaigns`): the HTML and text frame a campaign body is placed in.

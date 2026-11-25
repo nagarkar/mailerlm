@@ -1,5 +1,5 @@
-"""A list can hide the footer: when every list a campaign goes to hides it, the letter has no opt-out
-line and no postal address (the List-Unsubscribe header stays)."""
+"""A list can hide the footer: a reader reached through such a list gets no opt-out line and no
+postal address (the List-Unsubscribe header stays)."""
 
 import sqlite3
 
@@ -75,7 +75,7 @@ def test_renaming_a_list_keeps_the_setting(world):
     assert _shown()["pals"] is False
 
 
-def test_a_letter_to_lists_that_all_hide_the_footer_has_none(world):
+def test_a_letter_through_a_list_that_hides_the_footer_has_none(world):
     api.lists_footer("friends", show=False)
     api.campaigns_save("c", {"lists": ["friends"]})
     preview = api.campaigns_preview("c", write_files=False)
@@ -84,10 +84,9 @@ def test_a_letter_to_lists_that_all_hide_the_footer_has_none(world):
     assert preview["text"].rstrip().endswith("Ann") and "--" not in preview["text"]
     assert preview["text"].endswith("Ann\n")
     assert "border-top" not in preview["html"] and "News." in preview["html"]
-    check = api.campaigns_check("c")
-    assert check["footer"] == "hidden: every list is set to hide it"
+    assert api.campaigns_check("c")["by_list"][0]["footer"] == "hidden"
     plan = api.sends_plan("c")
-    assert plan["footer"] == "hidden: every list is set to hide it", plan
+    assert plan["by_list"][0]["footer"] == "hidden", plan
     assert plan["can_send"], plan["blockers"]
     api.sends_start("c", plan["fingerprint"])
     message = world.sent[0]
@@ -95,14 +94,17 @@ def test_a_letter_to_lists_that_all_hide_the_footer_has_none(world):
     assert message.unsubscribe_mailto == "mailto:ann+b@example.com?subject=unsubscribe"
 
 
-def test_one_list_that_shows_the_footer_keeps_it(world):
+def test_each_list_keeps_its_own_footer_in_one_send(world):
     api.lists_footer("friends", show=False)
     api.campaigns_save("c", {"lists": ["friends", "book-interest"]})
-    preview = api.campaigns_preview("c", write_files=False)
+    preview = api.campaigns_preview("c", write_files=False, list_name="book-interest")
     assert (
         LINE in preview["text"] and "1 Main St" in preview["text"] and "\n--\n" in preview["text"]
     )
-    assert api.sends_plan("c")["footer"] == "shown"
+    hidden = api.campaigns_preview("c", write_files=False, list_name="friends")
+    assert "1 Main St" not in hidden["text"] and hidden["footer"] == "hidden"
+    footers = {row["list"]: row["footer"] for row in api.sends_plan("c")["by_list"]}
+    assert footers == {"friends": "hidden", "book-interest": "shown"}
 
 
 def test_a_hidden_footer_needs_no_postal_address_or_opt_out_line(world):
