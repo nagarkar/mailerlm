@@ -1,5 +1,5 @@
 """Who a campaign would reach: the people on its lists who may be mailed right now, and whether
-that audience is a test list (then the subject says so)."""
+that audience is a test list (then the subject says so) and whether it hides the footer."""
 
 from __future__ import annotations
 
@@ -22,6 +22,21 @@ def is_test(connection: sqlite3.Connection, lists: tuple[str, ...]) -> bool:
         )
     ]
     return bool(flags) and all(flags)
+
+
+def footer_hidden(connection: sqlite3.Connection, lists: tuple[str, ...]) -> bool:
+    """True when the campaign names at least one list and every list it names hides the footer.
+    One list that shows it keeps the footer for everyone."""
+    if not lists:
+        return False
+    marks = ",".join("?" for _ in lists)
+    shown = [
+        row[0]
+        for row in connection.execute(
+            f"SELECT show_footer FROM mailing_list WHERE name IN ({marks})", lists
+        )
+    ]
+    return bool(shown) and not any(shown)
 
 
 def test_subject(subject: str) -> str:

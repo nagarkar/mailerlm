@@ -17,6 +17,9 @@ Decisions:
   its subject, added when the letter is rendered; the campaign's stored subject is never edited, so
   the same campaign goes to its real list afterwards unchanged. A test list changes nothing else:
   its members confirm like everyone else. (owner, 2026-11-25)
+- A list shows the footer (opt-out line and postal address) unless it is set to hide it
+  (`mailing_list.show_footer`, `mailerlm lists footer <name> --hide|--show`, the checkbox in the list's
+  details). The rule and its reason are in `mailerlm.consent`. (owner)
 
 - Boards show addresses masked (`a***@e***.com`); `--show-full-addresses` prints them, and is for
   the owner's own terminal. Why: an agent running a verb must not read the list. (owner)
@@ -29,6 +32,7 @@ Terms:
 - **contact**: one person, identified by a normalized email address and optionally a LinkedIn profile URL.
 - **list**: a named audience a campaign is sent to; a contact may be on several.
 - **test list**: a list marked for trying a letter out; mail to it says "Testing: " before the subject.
+- **hidden footer**: a list set so its letters carry no opt-out line or postal address.
 - **membership**: a contact's place on one list, with its consent status.
 - **tag**: a free label on a contact, such as `early-access`, used to narrow a campaign's audience.
 """

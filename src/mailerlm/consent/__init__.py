@@ -12,6 +12,13 @@ Decisions:
 - Confirmation and unsubscribe happen by reply, not by a public link: no public endpoint. Every campaign carries a
   `List-Unsubscribe: mailto:` header and an opt-out line in its footer. The line's wording is the owner's setting
   (Settings, overridable per campaign); it must still tell the reader they can stop the emails by replying. (owner)
+- A list can hide the footer (the opt-out line and the postal address); it is shown by default. A letter has no
+  footer only when every list it goes to hides it, and its `List-Unsubscribe: mailto:` header stays, so mail clients
+  still offer an opt-out. In the owner's words: "If someone hasn't subscribed to a mailing list, I don't want them to
+  have to see that thing because it's very impersonal. So for some mailing lists, we should have a configuration
+  option that says show footer or hide footer. And the show hide option should be defaulted to show ... and hide
+  should be the override". Trade-off: for mail that promotes the book, US law (CAN-SPAM) expects a visible opt-out
+  and a postal address; hiding them is the owner's choice per list. (owner)
 - Jev reads each reply; an unsubscribe applies at probability 0.80 or higher, a confirmation at 0.95 or higher and
   only for someone with a pending membership; every other option, and anything below its bar, waits for the owner
   (see `mailerlm.inbox`). A wrong yes mails someone who did not consent, so its bar is higher. (owner)

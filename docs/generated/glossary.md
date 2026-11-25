@@ -8,6 +8,7 @@
 - **double opt-in** (`mailerlm.consent`): a contact is mailed campaigns only after replying yes to a confirmation email.
 - **draft** (`mailerlm.editor`): the one unsaved version of a template; absent when it equals the saved version.
 - **fingerprint** (`mailerlm.delivery`): a short code of the exact letter, sender and audience a plan showed.
+- **hidden footer** (`mailerlm.contacts`): a list set so its letters carry no opt-out line or postal address.
 - **linkedin status** (`mailerlm.linkedin`): where a contact stands in the move from a LinkedIn conversation to a confirmed email subscription.
 - **list** (`mailerlm.contacts`): a named audience a campaign is sent to; a contact may be on several.
 - **membership** (`mailerlm.contacts`): a contact's place on one list, with its consent status.

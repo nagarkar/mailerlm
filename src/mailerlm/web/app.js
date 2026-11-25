@@ -211,15 +211,19 @@ async function listPage(name) {
   const view = h("div", {},
     h("p", {}, h("span", { class: "small" }, "Members: "), `${list.members} (${Object.entries(list.by_status).map(([s, n]) => `${n} ${s}`).join(", ") || "none"})`),
     h("p", {}, h("span", { class: "small" }, "Sender override: "), list.sender_override ? `${list.sender_name} ${list.sender_address}` : "none (uses Settings)"),
-    h("p", {}, h("span", { class: "small" }, "Test list: "), list.test ? "yes: every letter sent to it says “Testing: ” before the subject" : "no"));
+    h("p", {}, h("span", { class: "small" }, "Test list: "), list.test ? "yes: every letter sent to it says “Testing: ” before the subject" : "no"),
+    h("p", {}, h("span", { class: "small" }, "Footer: "), list.show_footer ? "shown (opt-out line and postal address)" : "hidden: letters that go only to lists like this one have no opt-out line or postal address"));
   const form = (done) => {
     const newName = text(list.name), senderName = text(list.sender_name), senderAddress = text(list.sender_address);
     const isTest = h("input", { type: "checkbox", checked: list.test });
+    const showFooter = h("input", { type: "checkbox", checked: list.show_footer });
     return h("div", {}, field("Name", newName), field("Sender name (optional override)", senderName), field("Sender address (optional override)", senderAddress),
       h("label", { style: "display:flex;gap:8px;align-items:center" }, isTest, "Test list (letters sent to it say “Testing: ” before the subject)"),
+      h("label", { style: "display:flex;gap:8px;align-items:center" }, showFooter, "Show the footer (opt-out line and postal address). Untick for friends: a letter that goes only to lists without it has no footer"),
       formButtons(async () => {
         // The flag is saved first, under the old name; the rename follows.
         if (isTest.checked !== list.test && !(await attempt(() => api("lists_test", { name: list.name, clear: !isTest.checked })))) return;
+        if (showFooter.checked !== list.show_footer && !(await attempt(() => api("lists_footer", { name: list.name, show: showFooter.checked })))) return;
         if (await attempt(() => api("lists_edit", { name: list.name, new_name: newName.value, sender_name: senderName.value, sender_address: senderAddress.value }), "Saved")) {
           if (newName.value.trim() === list.name) done(true); else location.hash = `#/lists/${enc(newName.value.trim())}`;
         }
@@ -590,7 +594,7 @@ function sendPanel(campaign) {
     go.append(arm);
     review.replaceChildren(
       h("div", { class: "notice" }, h("div", {}, h("strong", {}, "From: "), out.from, " · replies to ", out.reply_to), h("div", {}, h("strong", {}, "Subject: "), out.subject),
-        h("div", {}, h("strong", {}, "List: "), out.lists.length ? out.lists.join(", ") : "none chosen", out.test_list ? " (test list: the subject says “Testing: ”)" : "", out.tags.length ? ` (only people tagged ${out.tags.join(", ")})` : ""),
+        h("div", {}, h("strong", {}, "List: "), out.lists.length ? out.lists.join(", ") : "none chosen", out.test_list ? " (test list: the subject says “Testing: ”)" : "", out.footer && out.footer !== "shown" ? ` (footer ${out.footer})` : "", out.tags.length ? ` (only people tagged ${out.tags.join(", ")})` : ""),
         h("div", {}, h("strong", {}, "Reaches: "), plural(out.recipients, "person", "people"), Object.keys(out.skipped).length ? " (not reached: " + Object.entries(out.skipped).map(([why, n]) => `${n} ${why}`).join(", ") + ")" : ""),
         h("div", { class: "small" }, `Review code ${out.fingerprint}: the send stops if the letter or audience changes after this.`)),
       ...(out.blockers.length ? [h("div", { class: "notice bad" }, out.blockers.map((b) => h("div", {}, "• " + b)))] : []),
