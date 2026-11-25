@@ -151,6 +151,7 @@ def render(
     sender_name: str,
     postal_address: str,
     reply_to: str,
+    unsubscribe_line: str,
     resolve_image: Callable[[str], bytes | None],
     image_budget_bytes: int,
     first_name: str = "there",
@@ -218,13 +219,18 @@ def render(
         "body_html": body_html,
         "body_text": body_text,
         "postal_address": postal_address or "[postal address not set]",
-        "unsubscribe_line": "Reply UNSUBSCRIBE to this email and I will take you off the list.",
+        "unsubscribe_line": unsubscribe_line.strip(),
         "sender_name": sender_name,
     }
     if not postal_address:
         warnings.append("no postal address set (Settings or this campaign); a real send needs one")
     if not reply_to:
         warnings.append("no reply-to address set; unsubscribe by reply cannot work")
+    if "reply" not in unsubscribe_line.lower():
+        warnings.append(
+            "the opt-out line must tell the reader they can stop the emails by reply "
+            "(Settings, or this campaign's Sender section)"
+        )
     try:
         html_out = (
             SandboxedEnvironment(autoescape=True, undefined=StrictUndefined)

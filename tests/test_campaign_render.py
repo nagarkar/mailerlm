@@ -43,6 +43,7 @@ def email(body=BODY, **overrides):
         sender_name="Ann",
         postal_address="1 Main St",
         reply_to="ann+book@example.com",
+        unsubscribe_line="If you'd rather not hear from me, just reply and say so.",
         resolve_image=lambda name: png() if name == "cover.png" else None,
         image_budget_bytes=100 * 1024,
     )
@@ -78,7 +79,7 @@ def test_the_email_has_a_table_an_inline_image_a_footer_and_no_raw_html():
     assert "<table" in result.html and "<th" in result.html
     assert 'src="cid:image1"' in result.html and result.images[0].content_id == "image1"
     assert "<script>" not in result.html and "&lt;script&gt;" in result.html
-    assert "1 Main St" in result.html and "Reply UNSUBSCRIBE" in result.text
+    assert "1 Main St" in result.html and "just reply and say so." in result.text
     assert "Hi there, about The Book." in result.text and "A | B" in result.text
     assert "link (https://example.com/x)" in result.text
     assert result.unsubscribe_mailto == "mailto:ann+book@example.com?subject=unsubscribe"
@@ -117,3 +118,17 @@ def test_a_template_must_keep_the_place_for_the_letter():
     connection = sqlite3.connect(":memory:")
     with pytest.raises(repository.CampaignsError, match="body_html"):
         repository.template_save(connection, "x", "<html></html>", "{{ body_text }}")
+
+
+def test_the_opt_out_line_is_rendered_as_given_in_both_versions():
+    line = "I've assumed it's okay to send you these notes. Reply and I'll stop."
+    result = email(unsubscribe_line=line)
+    assert line in result.text
+    assert "I&#39;ve assumed it&#39;s okay" in result.html
+    assert not any("opt-out line" in w for w in result.warnings)
+
+
+@pytest.mark.parametrize("line", ["", "   ", "Click here to leave the list."])
+def test_an_opt_out_line_that_is_empty_or_does_not_say_reply_warns(line):
+    result = email(unsubscribe_line=line)
+    assert any("opt-out line" in w and "reply" in w for w in result.warnings)
