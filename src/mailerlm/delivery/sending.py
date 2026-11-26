@@ -59,6 +59,48 @@ def already_sent(connection: sqlite3.Connection, campaign_name: str, fingerprint
     )
 
 
+@dataclass(frozen=True, slots=True)
+class Mailed:
+    """One person who already has (or is being sent) this campaign in a live send."""
+
+    contact_id: int | None
+    email: str
+    send_id: int
+    letters: str  # 'campaign' or 'drafts': which path mailed them
+    status: str
+    at: str  # when that send was made
+
+
+def mailed(connection: sqlite3.Connection, campaign_name: str) -> list[Mailed]:
+    """Everyone a live send of this campaign has reached or is about to reach (every delivery row
+    except `failed`, which the provider never accepted). This is the once-per-person rule: both the
+    whole-list send and the draft sends leave these people out."""
+    rows = connection.execute(
+        "SELECT d.contact_id, d.email, s.id, s.letters, d.status, s.created_at FROM delivery d "
+        "JOIN send s ON s.id = d.send_id WHERE s.campaign_name = ? AND s.kind = 'live' "
+        "AND d.status != 'failed' ORDER BY d.id",
+        (campaign_name,),
+    ).fetchall()
+    return [Mailed(*row) for row in rows]
+
+
+def is_mailed(found: list[Mailed], contact_id: int | None, email: str) -> Mailed | None:
+    """The record that this person (by contact or by address) already has the campaign, or None."""
+    address = (email or "").strip().lower()
+    for item in found:
+        if (contact_id is not None and item.contact_id == contact_id) or (
+            address and item.email.strip().lower() == address
+        ):
+            return item
+    return None
+
+
+def send_letters(connection: sqlite3.Connection, send_id: int) -> str:
+    """Where a send's letters come from: 'campaign' or 'drafts'."""
+    row = connection.execute("SELECT letters FROM send WHERE id = ?", (send_id,)).fetchone()
+    return row[0] if row else "campaign"
+
+
 def create_send(
     connection: sqlite3.Connection,
     campaign_name: str,
@@ -69,14 +111,15 @@ def create_send(
     now: Callable[[], datetime] = datetime.now,
     excerpt: str = "",
     lists: tuple[str, ...] = (),
+    letters: str = "campaign",
 ) -> int:
     campaign = connection.execute(
         "SELECT id FROM campaign WHERE name = ?", (campaign_name,)
     ).fetchone()
     stamp = _stamp(now)
     cursor = connection.execute(
-        "INSERT INTO send (campaign_id, campaign_name, kind, status, subject, fingerprint, planned, created_at, excerpt, lists) "
-        "VALUES (?, ?, ?, 'sending', ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO send (campaign_id, campaign_name, kind, status, subject, fingerprint, planned, created_at, excerpt, lists, letters) "
+        "VALUES (?, ?, ?, 'sending', ?, ?, ?, ?, ?, ?, ?)",
         (
             campaign[0] if campaign else None,
             campaign_name,
@@ -87,6 +130,7 @@ def create_send(
             stamp,
             excerpt[:1500],
             json.dumps(list(lists)),
+            letters,
         ),
     )
     send_id = int(cursor.lastrowid or 0)
@@ -183,8 +227,8 @@ def counts(connection: sqlite3.Connection, send_id: int) -> dict[str, int]:
 
 def get_send(connection: sqlite3.Connection, send_id: int) -> dict:
     row = connection.execute(
-        "SELECT id, campaign_name, kind, status, subject, planned, created_at, started_at, finished_at "
-        "FROM send WHERE id = ?",
+        "SELECT id, campaign_name, kind, status, subject, planned, created_at, started_at, finished_at, "
+        "letters FROM send WHERE id = ?",
         (send_id,),
     ).fetchone()
     if row is None:
@@ -201,6 +245,7 @@ def get_send(connection: sqlite3.Connection, send_id: int) -> dict:
         "created_at",
         "started_at",
         "finished_at",
+        "letters",
     )
     return {**dict(zip(keys, row, strict=True)), "counts": counts(connection, send_id)}
 

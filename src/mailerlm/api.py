@@ -27,7 +27,7 @@ from typing import Any
 from llmlm import llm
 
 from mailerlm import config, paths, store
-from mailerlm.campaigns import audience, frontmatter, render, template_guard
+from mailerlm.campaigns import audience, drafts, frontmatter, render, template_guard
 from mailerlm.campaigns import repository as campaigns_repository
 from mailerlm.consent import states as consent_states
 from mailerlm.contacts import mask_email, parsing, repository
@@ -1325,12 +1325,19 @@ def _effective_sender(
 
 
 def _message(
-    connection: sqlite3.Connection, name: str, recipient: sending.Recipient, key: str
+    connection: sqlite3.Connection,
+    name: str,
+    recipient: sending.Recipient,
+    key: str,
+    overlay: dict | None = None,
 ) -> OutgoingMessage:
+    """The message for one recipient; `overlay` (a person draft's subject and body) replaces the
+    campaign's."""
     campaign, email = _render(
         connection,
         name,
         recipient.first_name,
+        overlay,
         list_name=recipient.list_name,
         test_prefix=recipient.test_prefix,
         show_footer=recipient.show_footer,
@@ -1363,6 +1370,21 @@ def _prepare(connection: sqlite3.Connection, name: str, lists: list[str] | None 
     campaign = campaigns_repository.campaign_get(connection, name)
     chosen = tuple(dict.fromkeys(lists)) if lists else tuple(campaign["lists"])
     reach = audience.per_list(connection, chosen, tuple(campaign["tags"]), campaign["kind"])
+    # Once per person: whoever a live send of this campaign already reached (the whole-list send or
+    # a draft send) is left out, so each path sees the other's sends.
+    already = sending.mailed(connection, name)
+    received = [r for r in reach.recipients if sending.is_mailed(already, r.contact_id, r.email)]
+    reach = dataclasses.replace(
+        reach,
+        recipients=tuple(r for r in reach.recipients if r not in received),
+        overlaps=tuple(
+            o for o in reach.overlaps if not sending.is_mailed(already, o.contact_id, o.email)
+        ),
+    )
+    remaining_ids = {r.contact_id for r in reach.recipients}
+    edited_drafts = [
+        d for d in drafts.all_for(connection, name) if d["edited"] and d["contact"] in remaining_ids
+    ]
     looks = {(r.list_name, r.test_prefix, r.show_footer) for r in reach.recipients}
     looks |= {(x.settings.name, x.settings.is_test, x.settings.show_footer) for x in reach.lists}
     renders: dict[tuple, render.RenderedEmail] = {}
@@ -1415,7 +1437,7 @@ def _prepare(connection: sqlite3.Connection, name: str, lists: list[str] | None 
     by_list = [
         {
             "list": x.settings.name,
-            "recipients": x.recipients,
+            "recipients": sum(1 for r in reach.recipients if r.list_name == x.settings.name),
             "footer": "shown" if x.settings.show_footer else "hidden",
             "testing_prefix": x.settings.is_test,
             "subject": renders[
@@ -1453,7 +1475,14 @@ def _prepare(connection: sqlite3.Connection, name: str, lists: list[str] | None 
         "reach": reach,
         "by_list": by_list,
         "overlaps": overlaps,
-        "notes": [_overlap_text(o, mailed=False) for o in reach.notes],
+        "notes": [_overlap_text(o, mailed=False) for o in reach.notes]
+        + (
+            [f"{len(received)} already received this campaign and will not be mailed again"]
+            if received
+            else []
+        ),
+        "already_received": len(received),
+        "edited_drafts": len(edited_drafts),
         "render_problems": render_problems,
         "problems": problems,
         "fingerprint": fingerprint,
@@ -1503,6 +1532,11 @@ def sends_plan(name: str, lists: list[str] | None = None) -> Board:
             )
         if repeated:
             blockers.append("this exact letter was already sent to this exact audience")
+        if plan["edited_drafts"]:
+            blockers.append(
+                f"{plan['edited_drafts']} of these people have an edited draft not sent yet; send the "
+                f"drafts (mailerlm drafts list {name}, or the Drafts page) or delete those drafts first"
+            )
         chosen = " ".join(f"--list {json.dumps(n) if ' ' in n else n}" for n in plan["lists"])
         return {
             "campaign": name,
@@ -1534,11 +1568,18 @@ def _execute(send_id: int, name: str, kind: str) -> dict[str, int]:
     connection = _open()
     running_sends.add(send_id)
     try:
+        from_drafts = sending.send_letters(connection, send_id) == "drafts"
         result = sending.run_send(
             connection,
             send_id,
             sender,
-            lambda recipient, key: _message(connection, name, recipient, key),
+            lambda recipient, key: _message(
+                connection,
+                name,
+                recipient,
+                key,
+                _draft_overlay(connection, name, recipient.contact_id) if from_drafts else None,
+            ),
             pause_seconds=_pause(sender),
         )
         if kind == "live":
@@ -1716,6 +1757,437 @@ def sends_poll(send: int | None = None) -> Board:
             )
             raise MailerlmError(f"{error}.{hint}") from error
         return {**changed, "next": "Run: mailerlm sends list"}
+
+    return _guard(work)
+
+
+# ---- person drafts -----------------------------------------------------------------------
+
+
+def _draft_overlay(connection: sqlite3.Connection, name: str, contact_id: int | None) -> dict:
+    """A person draft's subject and body, to render in place of the campaign's; a missing draft
+    fails that one message (recorded as failed), never sends the campaign letter instead."""
+    if contact_id is None:
+        raise SenderError("a draft send has no contact for this message")
+    try:
+        found = drafts.get(connection, name, contact_id)
+    except campaigns_repository.CampaignsError as error:
+        raise SenderError(f"the draft is gone ({error})") from error
+    return {"subject": found["subject"], "body": found["body"]}
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _DraftWorld:
+    campaign: dict
+    reach: audience.SendAudience  # everyone the campaign's lists reach now, before the once rule
+    already: list[sending.Mailed]
+    blocked: set[int]  # people mailed through two of the campaign's lists: no draft, no send
+
+    def reached(self, contact_id: int) -> audience.Reached | None:
+        return next((r for r in self.reach.recipients if r.contact_id == contact_id), None)
+
+    def mailed(self, contact_id: int, email: str) -> sending.Mailed | None:
+        return sending.is_mailed(self.already, contact_id, email)
+
+
+def _draft_world(connection: sqlite3.Connection, name: str) -> _DraftWorld:
+    campaign = campaigns_repository.campaign_get(connection, name)
+    reach = audience.per_list(
+        connection, tuple(campaign["lists"]), tuple(campaign["tags"]), campaign["kind"]
+    )
+    return _DraftWorld(
+        campaign,
+        reach,
+        sending.mailed(connection, name),
+        {o.contact_id for o in reach.blocking},
+    )
+
+
+def _draft_text(
+    connection: sqlite3.Connection, world: _DraftWorld, person: audience.Reached
+) -> drafts.Made:
+    """The campaign's subject and body for one person, their values filled in (still Markdown)."""
+    campaign = world.campaign
+    first, preferred = repository.greeting_names(connection, person.contact_id)
+    look = _list_look(connection, campaign, person.list_name)
+    who = _effective_sender(connection, campaign, look)
+    try:
+        return drafts.Made(
+            person.contact_id,
+            render.fill(
+                campaign["subject"], campaign["variables"], who["sender_name"], first, preferred
+            ),
+            render.fill(
+                campaign["body"], campaign["variables"], who["sender_name"], first, preferred
+            ),
+        )
+    except render.RenderError as error:
+        raise MailerlmError(str(error)) from error
+
+
+def drafts_make(name: str, dry_run: bool = False) -> Board:
+    """Make (or remake) one draft per person the campaign reaches now: new people get a draft,
+    unedited drafts follow the current campaign, edited drafts are kept, and unedited drafts of
+    people who left are removed. People already mailed this campaign keep their draft as it is."""
+
+    def work() -> Board:
+        with _transaction(dry_run) as connection:
+            world = _draft_world(connection, name)
+            locked = {
+                r.contact_id for r in world.reach.recipients if world.mailed(r.contact_id, r.email)
+            } | {m.contact_id for m in world.already if m.contact_id is not None}
+            made = [
+                _draft_text(connection, world, person)
+                for person in world.reach.recipients
+                if person.contact_id not in world.blocked
+            ]
+            result = drafts.sync(connection, name, made, locked)
+            who = lambda ids: [_who(connection, i) for i in ids]  # noqa: E731
+            board: Board = {
+                "campaign": name,
+                "drafts": len(drafts.all_for(connection, name)),
+                "added": who(result.added),
+                "updated": who(result.updated),
+                "kept_edited": who(result.kept_edited),
+                "removed": who(result.removed),
+                "kept_not_in_audience": who(result.kept_not_in_audience),
+                "not_made": [
+                    {**_who(connection, i), "why": "mailed through two of the campaign's lists"}
+                    for i in sorted(world.blocked)
+                ],
+                "dry_run": dry_run,
+                "next": f"Edit them on the Drafts page (#/campaigns/{name}/drafts) or run: "
+                f"mailerlm drafts list {name}",
+            }
+        return board
+
+    return _guard(work)
+
+
+def _draft_row(
+    connection: sqlite3.Connection, world: _DraftWorld, draft: dict, full_address: bool
+) -> dict:
+    person = world.reached(draft["contact"])
+    mailed = world.mailed(draft["contact"], draft["email"])
+    if mailed is not None:
+        state, why = "sent", ""
+    elif person is None:
+        state, why = (
+            "unreachable",
+            "no longer reached by the campaign's lists (left, unsubscribed or blocked)",
+        )
+    elif draft["contact"] in world.blocked:
+        state, why = "unreachable", "mailed through two of the campaign's lists; take them off one"
+    else:
+        state, why = "ready", ""
+    return {
+        **draft,
+        "email": draft["email"] if full_address else mask_email(draft["email"]),
+        "list": person.list_name if person else None,
+        "state": state,
+        "why": why,
+        "sent": None
+        if mailed is None
+        else {
+            "send": mailed.send_id,
+            "at": mailed.at,
+            "status": mailed.status,
+            "via": "this draft" if mailed.letters == "drafts" else "the whole-list send",
+        },
+    }
+
+
+def drafts_list(name: str, show_full_addresses: bool = False) -> Board:
+    """Every draft of the campaign: who, edited or not, and whether it is ready, sent or cannot be
+    sent; plus how many people the campaign reaches that have no draft yet."""
+
+    def work() -> Board:
+        with _transaction() as connection:
+            world = _draft_world(connection, name)
+            rows = [
+                _draft_row(connection, world, d, show_full_addresses)
+                for d in drafts.all_for(connection, name)
+            ]
+        have = {r["contact"] for r in rows}
+        missing = [
+            r
+            for r in world.reach.recipients
+            if r.contact_id not in have
+            and r.contact_id not in world.blocked
+            and not world.mailed(r.contact_id, r.email)
+        ]
+        ready = [r for r in rows if r["state"] == "ready"]
+        return {
+            "campaign": name,
+            "drafts": rows,
+            "remaining": len(ready),
+            "sent": sum(1 for r in rows if r["state"] == "sent"),
+            "without_draft": len(missing),
+            "next": f"Run: mailerlm drafts make {name}"
+            if missing or not rows
+            else f"Edit and send them on the Drafts page (#/campaigns/{name}/drafts)",
+        }
+
+    return _guard(work)
+
+
+def drafts_show(name: str, contact: int) -> Board:
+    """One person's draft: subject, body, edited, and whether it was sent."""
+
+    def work() -> Board:
+        with _transaction() as connection:
+            world = _draft_world(connection, name)
+            return {
+                "draft": _draft_row(connection, world, drafts.get(connection, name, contact), False)
+            }
+
+    return _guard(work)
+
+
+def _unsent_draft(
+    connection: sqlite3.Connection, name: str, contact: int
+) -> tuple[_DraftWorld, dict]:
+    world = _draft_world(connection, name)
+    draft = drafts.get(connection, name, contact)
+    mailed = world.mailed(contact, draft["email"])
+    if mailed is not None:
+        raise MailerlmError(
+            f"this person already received '{name}' (send #{mailed.send_id}, {mailed.at}); "
+            "a sent draft is locked"
+        )
+    return world, draft
+
+
+def drafts_save(name: str, contact: int, subject: str, body: str) -> Board:
+    """Save one person's draft (the page autosaves); a sent draft is locked."""
+
+    def work() -> Board:
+        with _transaction() as connection:
+            _unsent_draft(connection, name, contact)
+            saved = drafts.save(connection, name, contact, subject, body)
+        return {"contact": contact, "edited": saved["edited"], "updated_at": saved["updated_at"]}
+
+    return _guard(work)
+
+
+def drafts_delete(name: str, contact: int) -> Board:
+    """Delete one unsent draft (remaking drafts brings it back if the person is still reached)."""
+
+    def work() -> Board:
+        with _transaction() as connection:
+            _unsent_draft(connection, name, contact)
+            drafts.delete(connection, name, contact)
+        return {"contact": contact, "deleted": True}
+
+    return _guard(work)
+
+
+def drafts_preview(
+    name: str, contact: int, subject: str | None = None, body: str | None = None
+) -> Board:
+    """One person's draft rendered as they would get it (images inline); `subject` and `body`
+    preview unsaved text."""
+
+    def work() -> Board:
+        with _transaction() as connection:
+            world = _draft_world(connection, name)
+            draft = drafts.get(connection, name, contact)
+            person = world.reached(contact)
+            first, preferred = repository.greeting_names(connection, contact)
+            overlay = {
+                "subject": draft["subject"] if subject is None else subject,
+                "body": draft["body"] if body is None else body,
+            }
+            _, email = _render(
+                connection,
+                name,
+                first,
+                overlay,
+                person.list_name if person else None,
+                person.test_prefix if person else None,
+                person.show_footer if person else None,
+                preferred,
+            )
+        page = email.html
+        for image in email.images:
+            uri = f"data:{image.mime};base64,{base64.b64encode(image.data).decode()}"
+            page = page.replace(f"cid:{image.content_id}", uri)
+        return {"subject": email.subject, "html": page, "warnings": list(email.warnings)}
+
+    return _guard(work)
+
+
+def _draft_blockers(connection: sqlite3.Connection, world: _DraftWorld, how_many: int) -> list[str]:
+    """What stops a draft send of `how_many` letters: the sender settings, the caps."""
+    settings = config.load(paths.config_path())
+    blockers = []
+    if how_many > settings.get("caps", "max_recipients_per_send"):
+        blockers.append(
+            f"{how_many} recipients is over the cap of "
+            f"{settings.get('caps', 'max_recipients_per_send')} (caps.max_recipients_per_send)"
+        )
+    today = sending.live_sends_today(connection)
+    if today >= settings.get("caps", "max_sends_per_day"):
+        blockers.append(
+            f"{today} live sends today reached the cap of "
+            f"{settings.get('caps', 'max_sends_per_day')} (caps.max_sends_per_day)"
+        )
+    looks = {r.list_name for r in world.reach.recipients}
+    for list_name in sorted(looks) or [None]:
+        look = _list_look(connection, world.campaign, list_name)
+        who = _effective_sender(connection, world.campaign, look)
+        for key, label in (
+            ("sender_name", "sender name"),
+            ("sender_address", "sender address"),
+            ("reply_to", "reply-to address"),
+        ):
+            if not who[key]:
+                blockers.append(f"no {label} set (Settings, or this campaign's Sender section)")
+        if look.show_footer and not who["postal_address"]:
+            blockers.append("no postal address set (Settings, or this campaign's Sender section)")
+    return sorted(set(blockers))
+
+
+def _send_drafts(name: str, contacts: list[int] | None, expected: int | None) -> Board:
+    """Record one live send of these people's drafts (None: every ready draft) and run it."""
+    _sender()  # fail before anything is recorded when the key is missing
+    with _transaction() as connection:
+        world = _draft_world(connection, name)
+        rows = [_draft_row(connection, world, d, True) for d in drafts.all_for(connection, name)]
+        if contacts is not None:
+            chosen = [r for r in rows if r["contact"] in contacts]
+            if len(chosen) != len(contacts):
+                raise MailerlmError(f"no draft for that person in '{name}'")
+            for row in chosen:
+                if row["state"] == "sent":
+                    raise MailerlmError(
+                        f"this person already received '{name}' (send #{row['sent']['send']}, "
+                        f"{row['sent']['at']}); a sent draft is locked"
+                    )
+                if row["state"] != "ready":
+                    raise MailerlmError(f"cannot send this draft: {row['why']}")
+        else:
+            chosen = [r for r in rows if r["state"] == "ready"]
+            if expected is not None and len(chosen) != expected:
+                raise MailerlmError(
+                    f"{len(chosen)} drafts are ready now, not the {expected} you confirmed. "
+                    "Reload and confirm again"
+                )
+        if not chosen:
+            raise MailerlmError("no draft is ready to send")
+        blockers = _draft_blockers(connection, world, len(chosen))
+        empty = [r for r in chosen if not r["subject"].strip() or not r["body"].strip()]
+        if empty:
+            blockers.append(f"{len(empty)} of these drafts have an empty subject or letter")
+        if blockers:
+            raise MailerlmError("cannot send: " + "; ".join(blockers))
+        recipients = []
+        for row in chosen:
+            person = world.reached(row["contact"])
+            assert person is not None  # state "ready" means reached
+            recipients.append(
+                sending.Recipient(
+                    person.contact_id,
+                    person.email,
+                    "there",
+                    person.list_name,
+                    person.show_footer,
+                    person.test_prefix,
+                )
+            )
+        fingerprint = hashlib.sha256(
+            json.dumps([[r["contact"], r["subject"], r["body"]] for r in chosen]).encode()
+        ).hexdigest()[:16]
+        send_id = sending.create_send(
+            connection,
+            name,
+            "live",
+            chosen[0]["subject"] if len(chosen) == 1 else f"{len(chosen)} drafts",
+            fingerprint,
+            recipients,
+            excerpt=chosen[0]["body"],
+            lists=tuple(dict.fromkeys(r.list_name for r in recipients if r.list_name)),
+            letters="drafts",
+        )
+    counts = _execute(send_id, name, "live")
+    return {
+        "send": send_id,
+        "recipients": len(recipients),
+        "counts": counts,
+        "next": "Run: mailerlm sends poll",
+    }
+
+
+def drafts_send(name: str, contact: int) -> Board:
+    """Send one person their draft: the owner's act (the Send button on the Drafts page). It is
+    recorded as a live send of the campaign, and it locks the draft."""
+    return _guard(lambda: _send_drafts(name, [contact], None))
+
+
+def drafts_send_remaining(name: str, expected: int) -> Board:
+    """Send every ready draft of the campaign: the owner's act. `expected` is the count the owner
+    confirmed; the send stops if the number of ready drafts differs."""
+    return _guard(lambda: _send_drafts(name, None, expected))
+
+
+def drafts_test(name: str, contact: int) -> Board:
+    """Mail one person's draft once to your own reply-to address, as that person would get it;
+    nobody else is mailed."""
+
+    def work() -> Board:
+        sender = _sender()
+        with _transaction() as connection:
+            world = _draft_world(connection, name)
+            draft = drafts.get(connection, name, contact)
+            person = world.reached(contact)
+            blockers = _draft_blockers(connection, world, 1)
+            if blockers:
+                raise MailerlmError("cannot send yet: " + "; ".join(blockers))
+            target = _effective_sender(
+                connection,
+                world.campaign,
+                _list_look(connection, world.campaign, person.list_name if person else None),
+            )["reply_to"]
+            first, preferred = repository.greeting_names(connection, contact)
+            recipient = sending.Recipient(
+                None,
+                target,
+                first,
+                person.list_name if person else None,
+                person.show_footer if person else None,
+                person.test_prefix if person else None,
+                preferred,
+            )
+            send_id = sending.create_send(
+                connection,
+                name,
+                "test",
+                draft["subject"],
+                "draft-test",
+                [recipient],
+                excerpt=draft["body"],
+                letters="drafts",
+            )
+        overlay = {"subject": draft["subject"], "body": draft["body"]}
+        connection = _open()
+        running_sends.add(send_id)
+        try:
+            # The test greets as the person would be greeted, not as "there".
+            result = sending.run_send(
+                connection,
+                send_id,
+                sender,
+                lambda _recipient, key: _message(connection, name, recipient, key, overlay),
+            )
+        finally:
+            running_sends.discard(send_id)
+            connection.close()
+        return {
+            "send": send_id,
+            "sent_to": "your reply-to address",
+            "counts": result,
+            "next": "Check your inbox",
+        }
 
     return _guard(work)
 

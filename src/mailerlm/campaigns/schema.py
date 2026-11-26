@@ -69,3 +69,22 @@ CREATE TABLE campaign_image (
 
 # A campaign's own opt-out line for the footer; NULL uses the Settings default.
 OPT_OUT_LINE_MIGRATION = "ALTER TABLE campaign ADD COLUMN unsubscribe_line TEXT"
+
+# Person drafts: one editable copy of a campaign's letter per person, made from the campaign
+# (`made_*` is what was generated, so an edit is `subject != made_subject or body != made_body`).
+# Example row: (1, 4, 7, 'Happy Thanksgiving', 'Hi Ada, ...', 'Happy Thanksgiving', 'Hi Ada, ...',
+#               '2026-11-26T09:00:00', '2026-11-26T09:05:00')
+DRAFT_MIGRATION = """
+CREATE TABLE person_draft (
+    id INTEGER PRIMARY KEY,
+    campaign_id INTEGER NOT NULL REFERENCES campaign(id) ON DELETE CASCADE,
+    contact_id INTEGER NOT NULL REFERENCES contact(id) ON DELETE CASCADE,
+    subject TEXT NOT NULL,
+    body TEXT NOT NULL,
+    made_subject TEXT NOT NULL,
+    made_body TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (campaign_id, contact_id)
+) STRICT
+"""

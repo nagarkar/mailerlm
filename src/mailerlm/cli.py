@@ -428,6 +428,35 @@ def build_parser() -> clikit.Parser:
         "mailerlm sends poll",
     )
 
+    draft_command = sub.add_parser("drafts", help="one editable draft of a campaign per person")
+    draft_verbs = draft_command.add_subparsers(dest="subcommand", required=True)
+    draft_make = draft_verbs.add_parser("make", help="make or remake a draft for each person")
+    draft_make.add_argument("name")
+    _mutating(draft_make)
+    draft_make.set_defaults(api="drafts_make")
+    clikit.describe(
+        draft_make,
+        "Make one draft of the campaign per person it reaches now, their values filled in. Remaking adds drafts for new people, follows the campaign in drafts you have not edited, keeps edited drafts, and removes unedited drafts of people who left. Sends nothing.",
+        "mailerlm drafts make thanksgiving-2026-friends",
+    )
+    draft_list = draft_verbs.add_parser("list", help="the campaign's drafts and their state")
+    draft_list.add_argument("name")
+    draft_list.set_defaults(api="drafts_list")
+    clikit.describe(
+        draft_list,
+        "List each draft: who (address masked), edited or not, and ready, sent (when, and by which path) or unreachable. Sending is on the Drafts page.",
+        "mailerlm drafts list thanksgiving-2026-friends",
+    )
+    draft_show = draft_verbs.add_parser("show", help="one person's draft")
+    draft_show.add_argument("name")
+    draft_show.add_argument("contact", type=int, help="the contact number (#id in 'drafts list')")
+    draft_show.set_defaults(api="drafts_show")
+    clikit.describe(
+        draft_show,
+        "Show one person's draft: subject, edited, state; the letter itself with --json.",
+        "mailerlm drafts show thanksgiving-2026-friends 7",
+    )
+
     replies = sub.add_parser("replies", help="read replies to your list mail")
     reply_verbs = replies.add_subparsers(dest="subcommand", required=True)
     reply_check = reply_verbs.add_parser("check", help="read new replies and apply the safe ones")
@@ -547,6 +576,33 @@ def format_board(board: dict, as_json: bool) -> str:
                 lines.append(
                     f"  #{item['id']} {item['decision']} ({item['decided_by']}) {item['choice'] or '-'} {item['subject'][:50]}"
                 )
+        elif key == "drafts" and isinstance(value, list):
+            lines.append("drafts:" if value else "drafts: none")
+            for item in value:
+                sent = (
+                    f" sent {item['sent']['at']} via {item['sent']['via']}" if item["sent"] else ""
+                )
+                why = f" ({item['why']})" if item["why"] else ""
+                edited = " edited" if item["edited"] else ""
+                lines.append(
+                    f"  #{item['contact']} {item['name']!r} {item['email']} {item['state']}{edited}{sent}{why}"
+                )
+        elif key in (
+            "added",
+            "updated",
+            "kept_edited",
+            "removed",
+            "kept_not_in_audience",
+            "not_made",
+        ) and isinstance(value, list):
+            lines.append(f"{key}: {len(value)}")
+            for item in value:
+                why = f": {item['why']}" if item.get("why") else ""
+                lines.append(f"  #{item['contact']} {item['name']!r} {item['email']}{why}")
+        elif key == "draft":
+            for field in ("contact", "name", "email", "subject", "edited", "state", "why", "sent"):
+                lines.append(f"{field}: {value[field]}")
+            lines.append(f"body: ({len(value['body'])} characters; use --json to read it)")
         elif key == "sends":
             lines.append("sends:")
             for item in value:
