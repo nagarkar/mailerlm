@@ -1,8 +1,8 @@
 """Turn pasted text or a CSV into contact candidates; pure, no database.
 
 A line may be `email`, `Name <email>`, `Name: email`, or a LinkedIn profile URL (tracking query
-removed). A CSV with a header naming `email` or `linkedin_url` may also carry `name` and
-`tags` (semicolon separated). A line with neither an email nor a LinkedIn URL is rejected by
+removed). A CSV with a header naming `email` or `linkedin_url` may also carry `name`,
+`preferred_name` and `tags` (semicolon separated). A line with neither an email nor a LinkedIn URL is rejected by
 line number, never echoed.
 """
 
@@ -22,6 +22,7 @@ class Candidate:
     email: str | None
     name: str = ""
     linkedin_url: str | None = None
+    preferred_name: str = ""
     tags: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -63,6 +64,7 @@ def _parse_csv(text: str) -> tuple[list[Candidate], list[int]]:
             Candidate(
                 email=normalize_email(email.group()) if email else None,
                 name=_clean_name(row.get("name", "")),
+                preferred_name=_clean_name(row.get("preferred_name", "")),
                 linkedin_url=linkedin.group().rstrip("/") if linkedin else None,
                 tags=tags,
             )

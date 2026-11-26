@@ -4,7 +4,7 @@ kind: confirmation
 lists: []
 preview_text: "One reply keeps you on the list."
 ---
-Hi {{ first_name }},
+Hi {{ preferred_name }},
 
 You told me you were interested in my book, *{{ book_title }}*. I would like to send you occasional updates and early chapters as I finish them.
 

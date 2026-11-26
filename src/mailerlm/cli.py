@@ -173,6 +173,11 @@ def build_parser() -> clikit.Parser:
     add.add_argument("--email")
     add.add_argument("--name", default="")
     add.add_argument("--linkedin-url", dest="linkedin_url")
+    add.add_argument(
+        "--preferred-name",
+        dest="preferred_name",
+        help="the name they like to be called by, if not their first name",
+    )
     _list_and_tags(add)
     _confirm_reason(add)
     _mutating(add)
@@ -182,6 +187,26 @@ def build_parser() -> clikit.Parser:
         "Add one contact by email, LinkedIn URL, or both; optionally join a list. New list members start as 'imported' and are not mailed.",
         "mailerlm contacts add --email ada@example.com --name Ada --list book-interest",
     )
+    edit = contact_verbs.add_parser(
+        "edit", help="change one contact's name, address or preferred name"
+    )
+    edit.add_argument("contact", help="an email address or a contact id")
+    edit.add_argument("--email", help='a new email address ("" removes it)')
+    edit.add_argument("--name", help="the official name")
+    edit.add_argument("--linkedin-url", dest="linkedin_url", help='a LinkedIn URL ("" removes it)')
+    edit.add_argument(
+        "--preferred-name",
+        dest="preferred_name",
+        help='the name letters greet them by ({{ preferred_name }}); "" means their first name',
+    )
+    _mutating(edit)
+    edit.set_defaults(api="contacts_edit")
+    clikit.describe(
+        edit,
+        "Change only the fields given. The preferred name is what {{ preferred_name }} (the greeting) "
+        'says instead of the first word of the name; --preferred-name "" clears it.',
+        'mailerlm contacts edit 12 --preferred-name "Grace"',
+    )
     imp = contact_verbs.add_parser("import", help="import pasted text or a CSV")
     imp.add_argument("source", help="a file, or - for standard input")
     _list_and_tags(imp)
@@ -190,7 +215,8 @@ def build_parser() -> clikit.Parser:
     imp.set_defaults(api="contacts_import")
     clikit.describe(
         imp,
-        "Import lines like 'Name: email', 'Name <email>', a LinkedIn profile URL, or a CSV with an email header. Re-importing adds nothing.",
+        "Import lines like 'Name: email', 'Name <email>', a LinkedIn profile URL, or a CSV with an email header "
+        "(optional name, preferred_name and tags columns). Re-importing adds nothing.",
         "mailerlm contacts import people.txt --list book-interest --dry-run",
     )
     confirm = contact_verbs.add_parser(
@@ -323,6 +349,11 @@ def build_parser() -> clikit.Parser:
     preview.add_argument("name")
     preview.add_argument(
         "--first-name", dest="first_name", default="Friend", help="name used for {{ first_name }}"
+    )
+    preview.add_argument(
+        "--preferred-name",
+        dest="preferred_name",
+        help="name used for {{ preferred_name }} (default: the --first-name value)",
     )
     preview.add_argument(
         "--list",
@@ -491,8 +522,11 @@ def format_board(board: dict, as_json: bool) -> str:
                 flag = " DO-NOT-MAIL" if row["do_not_mail"] else ""
                 linkedin = " linkedin" if row["linkedin_url"] else ""
                 how = f" confirmed={row['confirmed']}" if row.get("confirmed") else ""
+                called = (
+                    f" (preferred {row['preferred_name']!r})" if row.get("preferred_name") else ""
+                )
                 lines.append(
-                    f"  {row['email']} {row['name']!r} lists={row['lists']}{how} tags={row['tags']}{linkedin}{flag}"
+                    f"  #{row['id']} {row['email']} {row['name']!r}{called} lists={row['lists']}{how} tags={row['tags']}{linkedin}{flag}"
                 )
         elif key in ("would_confirm", "confirmed", "declined") and isinstance(value, list):
             lines.append(f"{key}: {len(value)}")

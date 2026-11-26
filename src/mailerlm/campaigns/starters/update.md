@@ -3,7 +3,7 @@ subject: "An update on {{ book_title }}"
 lists: [book-interest]
 preview_text: "Where the book stands this month."
 ---
-Hi {{ first_name }},
+Hi {{ preferred_name }},
 
 Here is where *{{ book_title }}* stands.
 

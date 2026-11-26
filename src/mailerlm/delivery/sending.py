@@ -25,7 +25,8 @@ TERMINAL = {"bounced", "complained", "failed"}
 class Recipient:
     """One person of a send. `list_name` is the list they are reached through; `show_footer` and
     `test_prefix` are how their letter looks. None (a send from before per-list sends) means: as
-    the campaign's first list would have it."""
+    the campaign's first list would have it. `preferred_name` fills `{{ preferred_name }}` (None:
+    the first name)."""
 
     contact_id: int | None
     email: str
@@ -33,6 +34,7 @@ class Recipient:
     list_name: str | None = None
     show_footer: bool | None = None
     test_prefix: bool | None = None
+    preferred_name: str | None = None
 
 
 def _stamp(now: Callable[[], datetime]) -> str:
@@ -140,9 +142,13 @@ def run_send(
         (send_id,),
     ).fetchall()
     for position, (delivery_id, contact_id, email, list_name, footer, prefix) in enumerate(rows):
-        first_name = _first_name(connection, contact_id) if contact_id is not None else "there"
+        first_name, preferred_name = (
+            contacts_repository.greeting_names(connection, contact_id)
+            if contact_id is not None
+            else ("there", "there")
+        )
         recipient = Recipient(
-            contact_id, email, first_name, list_name, _bool(footer), _bool(prefix)
+            contact_id, email, first_name, list_name, _bool(footer), _bool(prefix), preferred_name
         )
         key = f"mailerlm-send-{send_id}-{email}"
         try:
@@ -165,14 +171,6 @@ def run_send(
             "UPDATE send SET status = 'done', finished_at = ? WHERE id = ?", (_stamp(now), send_id)
         )
     return counts(connection, send_id)
-
-
-def _first_name(connection: sqlite3.Connection, contact_id: int | None) -> str:
-    if contact_id is None:
-        return "there"
-    row = connection.execute("SELECT name FROM contact WHERE id = ?", (contact_id,)).fetchone()
-    name = (row[0] if row else "").strip()
-    return name.split()[0] if name else "there"
 
 
 def counts(connection: sqlite3.Connection, send_id: int) -> dict[str, int]:

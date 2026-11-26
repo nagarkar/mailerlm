@@ -4,7 +4,7 @@ lists: [book-interest]
 tags: [early-access]
 preview_text: "A chapter before anyone else sees it."
 ---
-Hi {{ first_name }},
+Hi {{ preferred_name }},
 
 As promised, here is an early chapter of *{{ book_title }}*, shared only with the people who asked.
 
