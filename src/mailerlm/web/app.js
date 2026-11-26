@@ -745,7 +745,7 @@ async function draftsPage(name, openContact) {
     h("p", {}, h("a", { href: `#/campaigns/${enc(name)}` }, `← ${name}`)),
     h("div", { class: "row spread" }, h("h1", {}, "Drafts, one per person"),
       h("div", { class: "row" }, h("button", { on: { click: make } }, data.drafts.length ? "Remake drafts" : "Make drafts"), sendAll)),
-    h("p", { class: "sub" }, `${plural(data.drafts.length, "draft")} · ${data.sent} sent · ${ready} ready${data.without_draft ? ` · ${plural(data.without_draft, "person", "people")} on the list without a draft (Remake drafts)` : ""}`),
+    h("p", { class: "sub" }, `${plural(data.drafts.length, "draft")} · ${data.sent} sent · ${ready} ready${data.without_draft ? ` · ${plural(data.without_draft, "person", "people")} on the list without a draft (${data.drafts.length ? "Remake" : "Make"} drafts)` : ""}`),
     h("p", { class: "small" }, "Each person gets their own copy of the campaign's letter with their name filled in. Edit any of them; edits save as you type. Remaking keeps your edits, follows the campaign in drafts you have not touched, and adds or removes people who joined or left. A person gets this campaign once: whoever was sent it here or by the campaign page's whole-list send is locked."),
     changes,
     data.drafts.length ? h("section", { class: "panel" }, cards) : h("p", { class: "empty" }, "No drafts yet. Make drafts to start."));
