@@ -1,8 +1,9 @@
 """The tables the contacts area owns, as one migration (applied by `mailerlm.store`).
 
 Example rows:
-  contact:      (1, 'ada@example.com', 'Ada', NULL, 0, '2026-10-10T20:00:00')
-                (2, NULL, 'Grace', 'https://www.linkedin.com/in/grace-example', 0, '...')
+  contact:      (1, 'ada@example.com', 'Ada', NULL, 0, '2026-10-10T20:00:00', NULL)
+                (2, NULL, 'Grace', 'https://www.linkedin.com/in/grace-example', 0, '...', NULL)
+                (3, 'g@example.com', 'Grace Hopper', NULL, 0, '...', 'Hopper')   preferred_name set
   mailing_list: (1, 'book-interest', NULL, NULL, '2026-10-10T20:00:00', 0, 1)
                 (2, 'Testing', NULL, NULL, '2026-11-25T09:00:00', 1, 1)   is_test = 1: a test list
                 (3, 'friends', NULL, NULL, '2026-11-25T09:00:00', 0, 0)   show_footer = 0: no footer
@@ -67,3 +68,7 @@ CREATE TABLE membership_event (
     at TEXT NOT NULL
 ) STRICT
 """
+
+# The name a person likes to be called by (`{{ preferred_name }}`), apart from the official name;
+# NULL means "the first word of `name`". See `mailerlm.contacts`.
+PREFERRED_NAME_MIGRATION = "ALTER TABLE contact ADD COLUMN preferred_name TEXT"

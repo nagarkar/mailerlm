@@ -40,6 +40,7 @@ MIGRATIONS: list[str] = [
     contacts_schema.FOOTER_MIGRATION,
     delivery_schema.LIST_MIGRATION,
     contacts_schema.CONFIRMATION_MIGRATION,
+    contacts_schema.PREFERRED_NAME_MIGRATION,
 ]
 
 

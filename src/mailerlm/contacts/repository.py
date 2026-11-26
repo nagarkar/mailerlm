@@ -81,19 +81,22 @@ def find_contact_id(connection: sqlite3.Connection, candidate: Candidate) -> int
 def upsert_contact(
     connection: sqlite3.Connection, candidate: Candidate, now: Clock = datetime.now
 ) -> tuple[int, bool]:
-    """The contact's id and whether it was new. A match fills a blank name, email or LinkedIn
-    URL and never overwrites what the owner already has."""
+    """The contact's id and whether it was new. A match fills a blank name, email, LinkedIn
+    URL or preferred name and never overwrites what the owner already has."""
     existing = find_contact_id(connection, candidate)
+    preferred = _preferred(candidate.preferred_name)
     if existing is None:
         cursor = connection.execute(
-            "INSERT INTO contact (email, name, linkedin_url, created_at) VALUES (?, ?, ?, ?)",
-            (candidate.email, candidate.name, candidate.linkedin_url, _stamp(now)),
+            "INSERT INTO contact (email, name, linkedin_url, created_at, preferred_name) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (candidate.email, candidate.name, candidate.linkedin_url, _stamp(now), preferred),
         )
         return int(cursor.lastrowid or 0), True
     connection.execute(
         "UPDATE contact SET name = CASE WHEN name = '' THEN ? ELSE name END, "
-        "email = COALESCE(email, ?), linkedin_url = COALESCE(linkedin_url, ?) WHERE id = ?",
-        (candidate.name, candidate.email, candidate.linkedin_url, existing),
+        "email = COALESCE(email, ?), linkedin_url = COALESCE(linkedin_url, ?), "
+        "preferred_name = COALESCE(preferred_name, ?) WHERE id = ?",
+        (candidate.name, candidate.email, candidate.linkedin_url, preferred, existing),
     )
     return existing, False
 
@@ -153,21 +156,45 @@ def contact_by_ref(connection: sqlite3.Connection, ref: str | int) -> int:
     return row[0]
 
 
+def _preferred(text: str | None) -> str | None:
+    """A preferred name as stored: trimmed, and blank means NULL ("same as the first name")."""
+    return " ".join((text or "").split()) or None
+
+
+def greeting_names(connection: sqlite3.Connection, contact_id: int | None) -> tuple[str, str]:
+    """(first_name, preferred_name) for a letter: the first word of the official name (else
+    "there"), and the preferred name when set (else that first name)."""
+    row = connection.execute(
+        "SELECT name, preferred_name FROM contact WHERE id = ?", (contact_id,)
+    ).fetchone()
+    name = (row[0] if row else "").strip()
+    first = name.split()[0] if name else "there"
+    return first, (row[1] if row else None) or first
+
+
 def edit_contact(
     connection: sqlite3.Connection,
     contact_id: int,
-    email: str | None,
-    name: str,
-    linkedin_url: str | None,
+    email: str | None = None,
+    name: str | None = None,
+    linkedin_url: str | None = None,
+    preferred_name: str | None = None,
 ) -> None:
-    email = (email or "").strip().lower() or None
-    linkedin_url = (linkedin_url or "").strip() or None
+    """Change the fields given; None leaves a field as it is, "" clears it."""
+    old_email, old_name, old_linkedin, old_preferred = connection.execute(
+        "SELECT email, name, linkedin_url, preferred_name FROM contact WHERE id = ?", (contact_id,)
+    ).fetchone()
+    email = old_email if email is None else (email.strip().lower() or None)
+    linkedin_url = old_linkedin if linkedin_url is None else (linkedin_url.strip() or None)
+    name = old_name if name is None else name.strip()
+    preferred = old_preferred if preferred_name is None else _preferred(preferred_name)
     if not email and not linkedin_url:
         raise ContactsError("a contact needs an email or a LinkedIn URL")
     try:
         connection.execute(
-            "UPDATE contact SET email = ?, name = ?, linkedin_url = ? WHERE id = ?",
-            (email, name.strip(), linkedin_url, contact_id),
+            "UPDATE contact SET email = ?, name = ?, linkedin_url = ?, preferred_name = ? "
+            "WHERE id = ?",
+            (email, name, linkedin_url, preferred, contact_id),
         )
     except sqlite3.IntegrityError as error:
         raise ContactsError("another contact already has that email or LinkedIn URL") from error
@@ -263,12 +290,13 @@ def find(
         parameters.append(tag)
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     rows = connection.execute(
-        "SELECT DISTINCT c.id, c.email, c.name, c.linkedin_url, c.do_not_mail FROM contact c "
+        "SELECT DISTINCT c.id, c.email, c.name, c.linkedin_url, c.do_not_mail, c.preferred_name "
+        "FROM contact c "
         f"LEFT JOIN membership m ON m.contact_id = c.id {where} ORDER BY c.id",
         parameters,
     ).fetchall()
     out = []
-    for contact_id, email, name, linkedin_url, do_not_mail in rows:
+    for contact_id, email, name, linkedin_url, do_not_mail, preferred_name in rows:
         memberships = connection.execute(
             "SELECT l.name, m.status, m.confirmed_by, m.confirm_reason FROM membership m "
             "JOIN mailing_list l ON l.id = m.list_id WHERE m.contact_id = ? ORDER BY l.name",
@@ -285,6 +313,7 @@ def find(
                 "id": contact_id,
                 "email": email,
                 "name": name,
+                "preferred_name": preferred_name,
                 "linkedin_url": linkedin_url,
                 "do_not_mail": bool(do_not_mail),
                 "lists": {name_: status_ for name_, status_, _, _ in memberships},

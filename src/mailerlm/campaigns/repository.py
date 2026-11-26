@@ -31,7 +31,7 @@ SENDER_SETTINGS = (
 )
 # The footer's opt-out line when the owner has set none (template variable `unsubscribe_line`).
 DEFAULT_UNSUBSCRIBE_LINE = "Reply UNSUBSCRIBE to this email and I will take you off the list."
-RESERVED_VARIABLES = {"first_name", "sender_name"}
+RESERVED_VARIABLES = {"first_name", "preferred_name", "sender_name"}
 NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.\-]{0,59}$")
 VARIABLE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 FILENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,79}$")

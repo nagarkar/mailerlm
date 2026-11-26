@@ -25,8 +25,14 @@ Decisions:
   the owner's own terminal. Why: an agent running a verb must not read the list. (owner)
 - Every mutating verb takes `--dry-run`, which runs the change on an in-memory copy of the store
   and reports the counts. (owner)
-- Importing never overwrites what the owner already has: a match fills a blank name, email or
-  LinkedIn URL only, and a re-import adds nothing. (owner)
+- Importing never overwrites what the owner already has: a match fills a blank name, email,
+  LinkedIn URL or preferred name only, and a re-import adds nothing. (owner)
+- A contact may have a preferred name, the name they like to be called by, apart from the official
+  name (Grace Hopper goes by "Hopper"). Letters greet with `{{ preferred_name }}`: the preferred
+  name when set, else the first word of the name, else "there"; `{{ first_name }}` stays the first
+  word of the official name. Blank means "same as the first name" and is stored as NULL. Set it
+  with `mailerlm contacts edit <contact> --preferred-name N` (`""` clears), `--preferred-name` on
+  `contacts add`, a `preferred_name` CSV column, or the person's Edit form. (owner)
 
 Terms:
 - **contact**: one person, identified by a normalized email address and optionally a LinkedIn profile URL.
@@ -34,6 +40,7 @@ Terms:
 - **test list**: a list marked for trying a letter out; mail to it says "Testing: " before the subject.
 - **hidden footer**: a list set so its letters carry no opt-out line or postal address.
 - **membership**: a contact's place on one list, with its consent status.
+- **preferred name**: the name a person likes to be called by in a letter's greeting, when it is not the first word of their official name.
 - **tag**: a free label on a contact, such as `early-access`, used to narrow a campaign's audience.
 """
 

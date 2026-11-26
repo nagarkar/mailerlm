@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import dataclasses
 import difflib
 import hashlib
 import json
@@ -444,9 +445,11 @@ def contacts_add(
     tags: tuple[str, ...] = (),
     dry_run: bool = False,
     confirm_reason: str | None = None,
+    preferred_name: str | None = None,
 ) -> Board:
     """Add one contact (an email, a LinkedIn URL, or both) and optionally join a list; with
-    `confirm_reason`, the owner also confirms them on that list (see `contacts_confirm`)."""
+    `confirm_reason`, the owner also confirms them on that list (see `contacts_confirm`).
+    `preferred_name` is the name they like to be called by (blank: their first name)."""
 
     def work() -> Board:
         text = " ".join(part for part in (name and f"{name}:", email, linkedin_url) if part)
@@ -456,10 +459,11 @@ def contacts_add(
                 "give an email or a LinkedIn profile URL. Run: mailerlm help contacts add"
             )
         _confirm_needs_list(list_name, confirm_reason)
+        candidate = dataclasses.replace(candidates[0], preferred_name=preferred_name or "")
         ids: list[int] = []
         with _transaction(dry_run) as connection:
             counts = repository.import_candidates(
-                connection, candidates[:1], list_name, tags, contact_ids=ids
+                connection, [candidate], list_name, tags, contact_ids=ids
             )
             confirmed = _confirm_on_import(connection, ids, list_name, confirm_reason)
         return {
@@ -540,10 +544,11 @@ def _confirm_on_import(
 
 
 def _who(connection: sqlite3.Connection, contact_id: int) -> dict:
-    email, name = connection.execute(
-        "SELECT email, name FROM contact WHERE id = ?", (contact_id,)
+    email, name, preferred_name = connection.execute(
+        "SELECT email, name, preferred_name FROM contact WHERE id = ?", (contact_id,)
     ).fetchone()
-    return {"contact": contact_id, "name": name, "email": mask_email(email)}
+    who: Board = {"contact": contact_id, "name": name, "email": mask_email(email)}
+    return {**who, "preferred_name": preferred_name} if preferred_name else who
 
 
 def _confirm_many(
@@ -658,18 +663,30 @@ def contacts_find(
 
 
 def contacts_edit(
-    contact: str | int, email: str | None, name: str = "", linkedin_url: str | None = None
+    contact: str | int,
+    email: str | None = None,
+    name: str | None = None,
+    linkedin_url: str | None = None,
+    preferred_name: str | None = None,
+    dry_run: bool = False,
 ) -> Board:
+    """Change the fields given (None leaves one as it is; "" clears an email, LinkedIn URL or
+    preferred name). A blank preferred name means "call them by their first name"."""
+
     def work() -> Board:
-        with _transaction() as connection:
+        with _transaction(dry_run) as connection:
+            contact_id = repository.contact_by_ref(connection, contact)
             repository.edit_contact(
-                connection,
-                repository.contact_by_ref(connection, contact),
-                email,
-                name,
-                linkedin_url,
+                connection, contact_id, email, name, linkedin_url, preferred_name
             )
-        return {"edited": True, "next": "Run: mailerlm contacts find"}
+            first, preferred = repository.greeting_names(connection, contact_id)
+        return {
+            "dry_run": dry_run,
+            "edited": True,
+            "first_name": first,
+            "greeted_as": preferred,
+            "next": "Run: mailerlm contacts find",
+        }
 
     return _guard(work)
 
@@ -886,7 +903,7 @@ def templates_thread_clear(name: str) -> Board:
     return _guard(work)
 
 
-SAMPLE_LETTER = """Hi {{ first_name }},
+SAMPLE_LETTER = """Hi {{ preferred_name }},
 
 This is a sample letter, so you can see how the template looks without a campaign.
 
@@ -1115,6 +1132,7 @@ def _render(
     list_name: str | None = None,
     test_prefix: bool | None = None,
     show_footer: bool | None = None,
+    preferred_name: str | None = None,
 ) -> tuple[dict, render.RenderedEmail]:
     """Render the saved campaign as a reader reached through `list_name` gets it (default: the
     campaign's first list); `test_prefix` and `show_footer` override that list's settings for one
@@ -1165,6 +1183,7 @@ def _render(
             ),
             image_budget_bytes=settings.get("caps", "max_image_kilobytes_per_campaign") * 1024,
             first_name=first_name,
+            preferred_name=preferred_name,
         )
     except render.RenderError as error:
         raise MailerlmError(str(error)) from error
@@ -1212,14 +1231,18 @@ def campaigns_preview(
     write_files: bool = True,
     draft: dict | None = None,
     list_name: str | None = None,
+    preferred_name: str | None = None,
 ) -> Board:
     """The rendered email (images inline as data addresses) as a reader reached through `list_name`
-    gets it (default: the campaign's first list). From the command line it is also written under the
-    workspace's previews folder to open in a browser."""
+    gets it (default: the campaign's first list), greeting `preferred_name` (default: `first_name`).
+    From the command line it is also written under the workspace's previews folder to open in a
+    browser."""
 
     def work() -> Board:
         with _transaction() as connection:
-            campaign, email = _render(connection, name, first_name, draft, list_name)
+            campaign, email = _render(
+                connection, name, first_name, draft, list_name, preferred_name=preferred_name
+            )
         page = email.html
         for image in email.images:
             uri = f"data:{image.mime};base64,{base64.b64encode(image.data).decode()}"
@@ -1311,6 +1334,7 @@ def _message(
         list_name=recipient.list_name,
         test_prefix=recipient.test_prefix,
         show_footer=recipient.show_footer,
+        preferred_name=recipient.preferred_name,
     )
     who = _effective_sender(
         connection, campaign, _list_look(connection, campaign, recipient.list_name)

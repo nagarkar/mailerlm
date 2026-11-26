@@ -292,7 +292,8 @@ function personRow(person, allLists, contextList) {
     });
     wrap.replaceChildren(
       h("div", { class: "row spread" },
-        h("div", {}, h("span", { class: "name" }, person.name || "(no name)"), " ", h("span", { class: "small" }, person.email || "(no email)"),
+        h("div", {}, h("span", { class: "name" }, person.name || "(no name)"),
+          person.preferred_name ? h("span", { class: "small", title: "Preferred name: letters greet them by this" }, ` (goes by ${person.preferred_name})`) : null, " ", h("span", { class: "small" }, person.email || "(no email)"),
           person.linkedin_url ? h("span", {}, " · ", h("a", { href: person.linkedin_url, target: "_blank", rel: "noopener noreferrer" }, "LinkedIn")) : null),
         h("div", { class: "row" },
           h("button", { class: "quiet", on: { click: edit } }, "Edit"),
@@ -315,9 +316,11 @@ function personRow(person, allLists, contextList) {
   };
   const edit = () => {
     const name = text(person.name), email = text(person.email), linkedin = text(person.linkedin_url);
-    wrap.replaceChildren(field("Name", name), field("Email", email), field("LinkedIn URL", linkedin),
+    const preferred = text(person.preferred_name, { placeholder: "same as first name" });
+    wrap.replaceChildren(field("Name", name), field("Preferred name (what letters greet them by; blank: first name)", preferred),
+      field("Email", email), field("LinkedIn URL", linkedin),
       formButtons(async () => {
-        if (await attempt(() => api("contacts_edit", { contact: person.id, email: email.value, name: name.value, linkedin_url: linkedin.value }), "Saved")) refresh();
+        if (await attempt(() => api("contacts_edit", { contact: person.id, email: email.value, name: name.value, linkedin_url: linkedin.value, preferred_name: preferred.value }), "Saved")) refresh();
       }, draw));
   };
   draw();
@@ -516,7 +519,7 @@ function valuesSection(campaign) {
     };
     entries.forEach(([k, v]) => addRow(k, v));
     if (!entries.length) addRow("book_title", "");
-    return h("div", {}, h("p", { class: "small" }, "Use a value in the subject or body as {{ name }}. Names are lower-case letters, digits and underscores. {{ first_name }} and {{ sender_name }} are filled in for you."),
+    return h("div", {}, h("p", { class: "small" }, "Use a value in the subject or body as {{ name }}. Names are lower-case letters, digits and underscores. {{ preferred_name }} (the name each reader goes by; their first name unless set on the person), {{ first_name }} and {{ sender_name }} are filled in for you."),
       rows, h("button", { on: { click: () => addRow("", "") } }, "Add a value"),
       formButtons(async () => {
         const variables = {};
@@ -603,7 +606,7 @@ function previewSection(campaign) {
   const message = h("div");
   const run = async () => {
     try {
-      const out = await api("campaigns_preview", { name: campaign.name, first_name: first.value, write_files: false });
+      const out = await api("campaigns_preview", { name: campaign.name, first_name: first.value, preferred_name: first.value, write_files: false });
       show(out.html); plain.textContent = out.text;
       message.replaceChildren(out.warnings.length ? h("div", { class: "notice warn" }, out.warnings.join(" · ")) : "");
     } catch (error) { message.replaceChildren(h("div", { class: "notice bad" }, error.message)); }

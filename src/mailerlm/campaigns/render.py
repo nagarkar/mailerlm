@@ -1,7 +1,9 @@
 """Render a campaign into the pieces of an email: subject, HTML, plain text and inline images.
 
 The body is Markdown (tables, links, lists, images, quotes, code); raw HTML in it is not
-rendered. The body may use `{{ first_name }}`, `{{ book_title }}` and `{{ sender_name }}`.
+rendered. The body may use `{{ preferred_name }}` (the name the reader likes to be called by;
+the greeting), `{{ first_name }}` (the first word of their official name), the campaign's own
+values such as `{{ book_title }}`, and `{{ sender_name }}`.
 Images are local files next to the campaign (or below it); each becomes an inline `cid:`
 attachment after `images.prepare`. The footer carries the postal address and the
 opt-out line. When the footer is hidden (`show_footer=False`), both are cut out of whatever
@@ -211,11 +213,17 @@ def render(
     image_budget_bytes: int,
     first_name: str = "there",
     show_footer: bool = True,
+    preferred_name: str | None = None,
 ) -> RenderedEmail:
     """Everything is passed in; nothing is read from disk. `resolve_image(name)` returns the bytes of
-    the campaign's image of that name, or None."""
+    the campaign's image of that name, or None. A blank `preferred_name` means `first_name`."""
     warnings: list[str] = []
-    placeholders = {**variables, "first_name": first_name, "sender_name": sender_name}
+    placeholders = {
+        **variables,
+        "first_name": first_name,
+        "preferred_name": preferred_name or first_name,
+        "sender_name": sender_name,
+    }
     for key, value in variables.items():
         if not value.strip():
             warnings.append(f"the value '{key}' is empty")
