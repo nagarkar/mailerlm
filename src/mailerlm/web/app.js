@@ -869,7 +869,7 @@ async function templatePage(name) {
   const [data, { campaigns }] = await Promise.all([api("templates_get", { name }), api("campaigns_list")]);
   const { template, editor } = data;
   const start = data.draft || template;
-  const html = h("textarea", { style: "min-height:300px" }, start.html);
+  const html = h("textarea", { class: "code", style: "min-height:300px" }, start.html);
   const textFrame = h("textarea", { class: "short" }, start.text);
   const status = h("span", { class: "chip" });
   const problems = h("div");
