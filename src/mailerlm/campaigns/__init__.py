@@ -52,5 +52,7 @@ Terms:
 - **starter**: a shipped campaign text that a new campaign is created from.
 - **audience**: the subscribed members of the lists chosen for a send that carry the campaign's tags.
 - **reached through**: the one chosen list a reader is mailed through; its settings shape their letter.
+- **person draft**: one person's own editable copy of a campaign's subject and letter, their values
+  filled in; sent from the Drafts page and locked once sent (`drafts.py`).
 - **overlap**: a person who would be mailed through two or more of the lists chosen for one send; it stops the send.
 """

@@ -15,6 +15,7 @@
 - **membership** (`mailerlm.contacts`): a contact's place on one list, with its consent status.
 - **needs-you queue** (`mailerlm.consent`): replies the classifier did not settle, waiting for the owner.
 - **overlap** (`mailerlm.campaigns`): a person who would be mailed through two or more of the lists chosen for one send; it stops the send.
+- **person draft** (`mailerlm.campaigns`): one person's own editable copy of a campaign's subject and letter, their values filled in; sent from the Drafts page and locked once sent (`drafts.py`).
 - **preferred name** (`mailerlm.contacts`): the name a person likes to be called by in a letter's greeting, when it is not the first word of their official name.
 - **reached through** (`mailerlm.campaigns`): the one chosen list a reader is mailed through; its settings shape their letter.
 - **reply** (`mailerlm.inbox`): a message from someone mailerlm has mailed, stored with the letter it answers and what was decided.

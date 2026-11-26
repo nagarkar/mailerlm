@@ -52,3 +52,10 @@ ALTER TABLE delivery ADD COLUMN list_name TEXT;
 ALTER TABLE delivery ADD COLUMN show_footer INTEGER CHECK (show_footer IN (0, 1));
 ALTER TABLE delivery ADD COLUMN test_prefix INTEGER CHECK (test_prefix IN (0, 1))
 """
+
+# Where a send's letters come from: the campaign (one letter rendered per person) or each person's
+# draft (`mailerlm.campaigns.drafts`), so a resumed draft send renders the drafts again.
+LETTERS_MIGRATION = (
+    "ALTER TABLE send ADD COLUMN letters TEXT NOT NULL DEFAULT 'campaign' "
+    "CHECK (letters IN ('campaign', 'drafts'))"
+)

@@ -21,6 +21,11 @@ Decisions:
 - Delivery status is polled from Resend's API (no webhook receiver, no public endpoint); reading status
   needs a full-access key, and a bounce or complaint blocks that person (do-not-mail). (owner)
 - Tracking is a setting of the sending domain in Resend; the campaign flags are notes. (owner)
+- Once per person: a person gets a campaign at most once, through the whole-list send or a person
+  draft. `sending.mailed` (every delivery row of the campaign's live sends except `failed`) is read by
+  both paths: the plan leaves those people out, and a draft to one of them is locked. A draft send is
+  an ordinary live send with `letters = 'drafts'`, so `sends list`, `poll` and `resume` cover it.
+  Enforced by: tests/test_drafts.py.
 
 Terms:
 - **send**: one campaign delivered (or tested) to the lists chosen for it, with a row per recipient that records

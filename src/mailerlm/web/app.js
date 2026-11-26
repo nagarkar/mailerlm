@@ -119,6 +119,7 @@ function text(value, props) { return h("input", { type: "text", value: value || 
 const routes = [
   [/^#\/?$/, "", home],
   [/^#\/campaigns$/, "campaigns", campaignsPage],
+  [/^#\/campaigns\/([^/]+)\/drafts(?:\/(\d+))?$/, "campaigns", draftsPage],
   [/^#\/campaigns\/(.+)$/, "campaigns", campaignPage],
   [/^#\/lists$/, "lists", listsPage],
   [/^#\/lists\/(.+)$/, "lists", listPage],
@@ -139,7 +140,7 @@ async function render() {
     if (active) active.classList.add("on");
     app.replaceChildren(h("p", { class: "small" }, "Loading…"));
     try {
-      const page = await view(...match.slice(1).map(decodeURIComponent));
+      const page = await view(...match.slice(1).map((part) => (part == null ? part : decodeURIComponent(part))));
       app.replaceChildren(page);
     } catch (error) {
       app.replaceChildren(h("div", { class: "notice bad" }, error.message), h("a", { href: "#/" }, "Back to home"));
@@ -439,7 +440,7 @@ async function campaignPage(name) {
   const root = h("div", {},
     h("p", {}, h("a", { href: "#/campaigns" }, "← All campaigns")),
     h("div", { class: "row spread" }, h("h1", {}, campaign.name),
-      h("div", { class: "row" }, duplicateButton(campaign.name), inlineConfirm("Delete campaign", async () => {
+      h("div", { class: "row" }, h("a", { class: "button", href: `#/campaigns/${enc(campaign.name)}/drafts` }, "Drafts, one per person"), duplicateButton(campaign.name), inlineConfirm("Delete campaign", async () => {
         if (await attempt(() => api("campaigns_delete", { name }), "Campaign deleted")) location.hash = "#/campaigns";
       }, "Delete this campaign and its images"))),
     h("p", { class: "sub" }, `${campaign.kind === "confirmation" ? "Confirmation letter" : "Campaign"} · edited ${when(campaign.updated_at)}`));
@@ -686,6 +687,173 @@ function sendPanel(campaign, allLists) {
     h("div", {}, boxes.map((b) => b.label)),
     review, h("h2", { style: "margin-top:16px;font-size:16px" }, "History"),
     h("div", { class: "row", style: "margin:6px 0" }, h("button", { class: "quiet", on: { click: async () => { if (await attempt(() => api("sends_poll", {}), "Delivery status updated")) drawHistory(); } } }, "Refresh delivery status")), history);
+}
+
+// ---- person drafts -----------------------------------------------------------------------
+// Where page state lives: the campaign and the open person are in the URL hash
+// (#/campaigns/<name>/drafts/<contact>), so a reload or a bookmark opens the same draft; the scroll
+// position is a place in a long list, so it is in localStorage per campaign (key below).
+
+const draftScrollKey = (name) => `mailerlm.drafts.scroll.${name}`;
+function storageGet(key) { try { return localStorage.getItem(key); } catch { return null; } }
+function storageSet(key, value) { try { localStorage.setItem(key, value); } catch { /* private window: no memory */ } }
+
+async function draftsPage(name, openContact) {
+  const data = await api("drafts_list", { name, show_full_addresses: true });
+  const base = `#/campaigns/${enc(name)}/drafts`;
+  const changes = h("div");
+  let open = openContact ? Number(openContact) : null;
+  const flushers = new Map(); // contact -> async () => save now, if anything is unsaved
+  const flushAll = async () => { for (const flush of flushers.values()) await flush(); };
+
+  const make = async () => {
+    await flushAll();
+    const out = await attempt(() => api("drafts_make", { name }));
+    if (!out) return;
+    const names = (list) => list.map((p) => p.name || p.email).join(", ");
+    const lines = [
+      out.added.length && `Added for ${names(out.added)}`,
+      out.updated.length && `Updated from the campaign: ${names(out.updated)}`,
+      out.kept_edited.length && `Kept your edits: ${names(out.kept_edited)}`,
+      out.removed.length && `Removed (no longer on the list): ${names(out.removed)}`,
+      out.kept_not_in_audience.length && `Kept, though no longer on the list (edited): ${names(out.kept_not_in_audience)}`,
+      out.not_made.length && `No draft (on two of the campaign's lists): ${names(out.not_made)}`,
+    ].filter(Boolean);
+    sessionNotice = lines.length ? lines : ["Nothing changed."];
+    refresh();
+  };
+
+  const cards = data.drafts.map((draft) => draftCard(name, draft, draft.contact === open, (contact) => {
+    open = contact;
+    history.replaceState(null, "", contact ? `${base}/${contact}` : base); // no hashchange, no reload
+  }, flushers));
+
+  const ready = data.remaining;
+  const sendAll = h("span");
+  const arm = h("button", { class: "primary", disabled: ready === 0, on: { click: () => sendAll.replaceChildren(
+    h("span", {}, `Send ${plural(ready, "draft")} to ${plural(ready, "person", "people")} now? `),
+    h("button", { class: "primary", on: { click: async () => {
+      await flushAll();
+      const out = await attempt(() => api("drafts_send_remaining", { name, expected: ready }), `Sent ${plural(ready, "draft")}`);
+      if (out) refresh(); else sendAll.replaceChildren(arm);
+    } } }, "Yes, send"),
+    h("button", { on: { click: () => sendAll.replaceChildren(arm) } }, "Cancel")) } }, `Send all remaining (${ready})`);
+  sendAll.append(arm);
+
+  if (sessionNotice) { changes.replaceChildren(h("div", { class: "notice good" }, sessionNotice.map((line) => h("div", {}, line)))); sessionNotice = null; }
+  const page = h("div", {},
+    h("p", {}, h("a", { href: `#/campaigns/${enc(name)}` }, `← ${name}`)),
+    h("div", { class: "row spread" }, h("h1", {}, "Drafts, one per person"),
+      h("div", { class: "row" }, h("button", { on: { click: make } }, data.drafts.length ? "Remake drafts" : "Make drafts"), sendAll)),
+    h("p", { class: "sub" }, `${plural(data.drafts.length, "draft")} · ${data.sent} sent · ${ready} ready${data.without_draft ? ` · ${plural(data.without_draft, "person", "people")} on the list without a draft (Remake drafts)` : ""}`),
+    h("p", { class: "small" }, "Each person gets their own copy of the campaign's letter with their name filled in. Edit any of them; edits save as you type. Remaking keeps your edits, follows the campaign in drafts you have not touched, and adds or removes people who joined or left. A person gets this campaign once: whoever was sent it here or by the campaign page's whole-list send is locked."),
+    changes,
+    data.drafts.length ? h("section", { class: "panel" }, cards) : h("p", { class: "empty" }, "No drafts yet. Make drafts to start."));
+
+  // Restore after render() has scrolled to the top; then remember the place as the owner scrolls.
+  setTimeout(() => {
+    const saved = Number(storageGet(draftScrollKey(name)));
+    if (saved) window.scrollTo(0, saved);
+    else if (open) document.getElementById(`draft-${open}`)?.scrollIntoView({ block: "start" });
+    const remember = debounce(() => { if (location.hash.startsWith(base)) storageSet(draftScrollKey(name), String(Math.round(window.scrollY))); }, 200);
+    window.addEventListener("scroll", remember, { passive: true });
+    window.addEventListener("hashchange", () => window.removeEventListener("scroll", remember), { once: true });
+  }, 0);
+  return page;
+}
+let sessionNotice = null; // what the last Make/Remake changed, shown once after the page redraws
+
+function draftCard(name, draft, startOpen, setOpen, flushers) {
+  const sent = draft.state === "sent";
+  const stateChip = sent ? h("span", { class: "chip subscribed" }, "sent")
+    : draft.state === "unreachable" ? h("span", { class: "chip bad" }, "cannot send")
+    : h("span", { class: "chip" }, "ready");
+  const editedChip = h("span", { class: `chip${draft.edited ? " imported" : ""}` }, draft.edited ? "edited" : "unedited");
+  const body = h("div");
+  const toggle = h("button", { class: "quiet" }, startOpen ? "Close" : sent ? "View" : "Open");
+  const card = h("div", { class: "person", id: `draft-${draft.contact}` },
+    h("div", { class: "row spread" },
+      h("div", {}, h("span", { class: "name" }, draft.name || draft.email), " ", h("span", { class: "small" }, draft.email),
+        h("div", { class: "chips", style: "margin-top:4px" }, stateChip, editedChip,
+          sent ? h("span", { class: "small" }, `${when(draft.sent.at)} via ${draft.sent.via} · ${draft.sent.status}`) : null,
+          draft.why ? h("span", { class: "small" }, draft.why) : null)),
+      toggle),
+    body);
+  let isOpen = false;
+  const show = (yes) => {
+    isOpen = yes;
+    toggle.textContent = yes ? "Close" : sent ? "View" : "Open";
+    if (!yes) { flushers.get(draft.contact)?.(); flushers.delete(draft.contact); body.replaceChildren(); return; }
+    body.replaceChildren(sent ? sentView(draft) : draftEditor(name, draft, editedChip, flushers));
+  };
+  toggle.addEventListener("click", () => { show(!isOpen); setOpen(isOpen ? draft.contact : null); });
+  if (startOpen) show(true);
+  return card;
+}
+
+function sentView(draft) {
+  return h("div", { style: "margin-top:10px" },
+    draft.sent.via === "this draft" ? null : h("div", { class: "notice warn" }, "This person was sent the campaign's letter by the whole-list send, not this draft."),
+    h("p", {}, h("span", { class: "small" }, "Subject: "), draft.subject),
+    h("pre", { class: "plain" }, draft.body));
+}
+
+function draftEditor(name, draft, editedChip, flushers) {
+  const contact = draft.contact;
+  const subject = text(draft.subject);
+  const box = h("textarea", {}, draft.body);
+  const { frame, show } = previewFrame();
+  const status = h("span", { class: "small" }, "Saved");
+  const message = h("div");
+  let dirty = false;
+  let saving = Promise.resolve();
+  const save = async () => {
+    if (!dirty) return saving;
+    dirty = false;
+    status.textContent = "Saving…";
+    saving = api("drafts_save", { name, contact, subject: subject.value, body: box.value }).then((out) => {
+      status.textContent = dirty ? "Unsaved changes" : "Saved";
+      editedChip.textContent = out.edited ? "edited" : "unedited";
+      editedChip.className = `chip${out.edited ? " imported" : ""}`;
+    }).catch((error) => { dirty = true; status.textContent = "Not saved"; toast(error.message, true); });
+    return saving;
+  };
+  const autosave = debounce(save, 700);
+  const flush = async () => { await save(); await saving; };
+  flushers.set(contact, flush);
+  const preview = debounce(async () => {
+    try {
+      const out = await api("drafts_preview", { name, contact, subject: subject.value, body: box.value });
+      show(out.html);
+      message.replaceChildren(out.warnings.length ? h("div", { class: "notice warn" }, out.warnings.join(" · ")) : "");
+    } catch (error) { message.replaceChildren(h("div", { class: "notice bad" }, error.message)); }
+  }, 450);
+  const changed = () => { dirty = true; status.textContent = "Unsaved changes"; autosave(); preview(); };
+  subject.addEventListener("input", changed);
+  box.addEventListener("input", changed);
+  preview();
+
+  const sendSlot = h("span");
+  const sendArm = h("button", { class: "primary", on: { click: () => sendSlot.replaceChildren(
+    h("span", {}, `Send to ${draft.name || draft.email} now? `),
+    h("button", { class: "primary", on: { click: async () => {
+      await flush();
+      if (await attempt(() => api("drafts_send", { name, contact }), "Sent")) refresh(); else sendSlot.replaceChildren(sendArm);
+    } } }, "Yes, send"),
+    h("button", { on: { click: () => sendSlot.replaceChildren(sendArm) } }, "Cancel")) } }, "Send");
+  sendSlot.append(sendArm);
+  const ready = draft.state === "ready";
+  if (!ready) sendArm.disabled = true;
+
+  return h("div", { style: "margin-top:10px" },
+    field("Subject", subject),
+    h("div", { class: "cols" }, h("div", {}, h("label", {}, "Letter (Markdown)"), box), h("div", {}, h("label", {}, "As they will see it"), frame)),
+    message,
+    h("div", { class: "row spread", style: "margin-top:10px" }, status,
+      h("div", { class: "row" },
+        inlineConfirm("Delete draft", async () => { if (await attempt(() => api("drafts_delete", { name, contact }), "Draft deleted")) { flushers.delete(contact); refresh(); } }, "Delete this draft (Remake brings back a fresh one)"),
+        h("button", { on: { click: async () => { await flush(); await attempt(() => api("drafts_test", { name, contact }), "Test sent to your reply-to address"); } } }, "Send test to me"),
+        sendSlot)));
 }
 
 // ---- templates ---------------------------------------------------------------------------

@@ -55,4 +55,5 @@ Rules that span modules, from each package's `Decisions:`. Owner rules end with 
 
 ## Agent-drafted
 
+- `mailerlm.delivery`: Once per person: a person gets a campaign at most once, through the whole-list send or a person draft. `sending.mailed` (every delivery row of the campaign's live sends except `failed`) is read by both paths: the plan leaves those people out, and a draft to one of them is locked. A draft send is an ordinary live send with `letters = 'drafts'`, so `sends list`, `poll` and `resume` cover it. Enforced by: tests/test_drafts.py.
 - `mailerlm.editor`: One edit of a template runs at a time. The model call holds no database lock.

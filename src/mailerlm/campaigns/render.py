@@ -198,6 +198,32 @@ def _body_environment() -> SandboxedEnvironment:
     return SandboxedEnvironment(undefined=StrictUndefined, autoescape=False)
 
 
+def fill(
+    text: str,
+    variables: dict[str, str],
+    sender_name: str,
+    first_name: str = "there",
+    preferred_name: str | None = None,
+) -> str:
+    """`text` (a subject or Markdown body) with one reader's values filled in, still Markdown: what
+    a person draft starts from. Uses the same placeholders as `render`."""
+    placeholders = {
+        **variables,
+        "first_name": first_name,
+        "preferred_name": preferred_name or first_name,
+        "sender_name": sender_name,
+    }
+    try:
+        environment = SandboxedEnvironment(
+            undefined=StrictUndefined, autoescape=False, keep_trailing_newline=True
+        )
+        return environment.from_string(text).render(**placeholders)
+    except Exception as error:  # jinja raises several types for a bad placeholder
+        raise RenderError(
+            f"the subject or body uses an unknown value or bad syntax ({error})"
+        ) from error
+
+
 def render(
     subject: str,
     body: str,
