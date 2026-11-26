@@ -80,6 +80,20 @@ def test_a_failed_message_is_recorded_and_the_rest_are_sent(world):
     assert board["counts"] == {"sent": 1, "failed": 1}
 
 
+def test_counts_include_only_statuses_with_deliveries_for_the_requested_send(world):
+    with api._transaction() as connection:
+        recipients = [
+            sending.Recipient(None, "ada@example.com", "Ada"),
+            sending.Recipient(None, "grace@example.com", "Grace"),
+        ]
+        send_id = sending.create_send(connection, "c", "test", "S", "first", recipients)
+        sending.create_send(connection, "c", "test", "S", "other", recipients[:1])
+        empty_send_id = sending.create_send(connection, "c", "test", "S", "empty", [])
+
+        assert sending.counts(connection, send_id) == {"queued": 2}
+        assert sending.counts(connection, empty_send_id) == {}
+
+
 def test_the_caps_raise_and_never_clamp(world, tmp_path):
     (tmp_path / "config.toml").write_text("[caps]\nmax_recipients_per_send = 1\n")
     plan = api.sends_plan("c")

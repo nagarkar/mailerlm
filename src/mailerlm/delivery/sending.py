@@ -218,6 +218,10 @@ def run_send(
 
 
 def counts(connection: sqlite3.Connection, send_id: int) -> dict[str, int]:
+    """Return delivery counts by status for one send.
+
+    Omit statuses with no deliveries; return an empty dict when the send has no deliveries.
+    """
     return dict(
         connection.execute(
             "SELECT status, COUNT(*) FROM delivery WHERE send_id = ? GROUP BY status", (send_id,)
